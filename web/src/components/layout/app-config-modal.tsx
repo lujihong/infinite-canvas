@@ -320,8 +320,14 @@ export function AppConfigModal() {
                             <div className="mb-5 space-y-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
-                                        <div className="text-sm font-medium">本地模型渠道</div>
-                                        <div className="mt-1 text-xs text-stone-500">可为生图、视频、文本、音频分别选择不同渠道的模型。</div>
+                                        <div className="text-sm font-medium">模型渠道配置（兼容 New API / OpenAI 格式）</div>
+                                        <div className="mt-1 text-xs text-stone-500">
+                                            支持接入新元宝视频工作台中转站及兼容渠道。如需获取令牌，可点击{" "}
+                                            <a href="https://api.xybcloud.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-600">
+                                                新元宝视频工作台中转站 (api.xybcloud.com)
+                                            </a>
+                                            。
+                                        </div>
                                     </div>
                                     <Button size="small" onClick={addLocalChannel}>
                                         新增渠道
@@ -329,37 +335,27 @@ export function AppConfigModal() {
                                 </div>
                                 {normalizeLocalChannels(config).map((channel, index) => (
                                     <div key={channel.id} className="space-y-2 rounded-md bg-stone-50 p-2 dark:bg-stone-900">
-                                        <div className="grid gap-2 md:grid-cols-[130px_150px_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                                        <div className="grid gap-2 md:grid-cols-[130px_160px_minmax(0,1fr)_minmax(0,1fr)_auto]">
                                             <Input value={channel.name} placeholder="渠道名称" onChange={(event) => patchLocalChannel(channel.id, { name: event.target.value })} />
                                             <Select
                                                 value={channel.protocol}
                                                 options={[
-                                                    { label: "OpenAI", value: "openai" },
-                                                    { label: "Gemini", value: "gemini" },
-                                                    { label: "Grok2API", value: "grok2api" },
-                                                    { label: "MiniMax & METASO", value: "metaso" },
-                                                    { label: "APIMart", value: "apimart" },
-                                                    { label: "KIE", value: "kie" },
-                                                    { label: "MiMo", value: "mimo" },
+                                                    { label: "OpenAI (兼容 New API)", value: "openai" },
                                                 ]}
                                                 onChange={(protocol: LocalModelChannel["protocol"]) => patchLocalChannel(channel.id, { protocol, baseUrl: modelChannelDefaultBaseUrls[protocol] })}
                                             />
-                                            <Input value={channel.baseUrl} placeholder="Base URL" onChange={(event) => patchLocalChannel(channel.id, { baseUrl: event.target.value })} />
-                                            <Input.Password value={channel.apiKey} placeholder="API Key" onChange={(event) => patchLocalChannel(channel.id, { apiKey: event.target.value })} />
-                                            <div className="relative flex flex-wrap gap-2 md:flex-nowrap">
+                                            <Input value={channel.baseUrl} placeholder="Base URL（例如 https://.../v1）" onChange={(event) => patchLocalChannel(channel.id, { baseUrl: event.target.value })} />
+                                            <Input.Password value={channel.apiKey} placeholder="API Key（sk-...）" onChange={(event) => patchLocalChannel(channel.id, { apiKey: event.target.value })} />
+                                            <div className="relative flex flex-wrap items-center gap-2 md:flex-nowrap">
                                                 <Button size="small" onClick={() => openLocalModelSelector(channel)}>
-                                                    选择
+                                                    选择模型
+                                                </Button>
+                                                <Button type="primary" size="small" href="https://api.xybcloud.com" target="_blank" rel="noopener noreferrer">
+                                                    获取 API Key
                                                 </Button>
                                                 <Button size="small" danger disabled={index === 0 && normalizeLocalChannels(config).length === 1} onClick={() => removeLocalChannel(channel.id)}>
                                                     删除
                                                 </Button>
-                                                {modelChannelApiKeyUrls[channel.protocol] ? (
-                                                    <div className="w-full md:absolute md:left-0 md:top-8">
-                                                        <Button block type="primary" size="small" href={modelChannelApiKeyUrls[channel.protocol]} target="_blank">
-                                                            获取 API Key
-                                                        </Button>
-                                                    </div>
-                                                ) : null}
                                             </div>
                                         </div>
                                         <div className="text-xs text-stone-500">已保存 {channel.models.length} 个模型</div>

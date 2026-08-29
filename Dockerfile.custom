@@ -1,0 +1,13 @@
+FROM ghcr.io/tigerowo/infinite-canvas:latest
+
+WORKDIR /app
+
+RUN rm -rf /app/web && mkdir -p /app/web
+
+# 覆盖 Next.js 编译产物与静态资源
+COPY custom_build/standalone/ /app/web/
+COPY custom_build/public/ /app/web/public/
+COPY custom_build/static/ /app/web/.next/static/
+
+EXPOSE 3000
+CMD ["/app/docker-entrypoint.sh"]

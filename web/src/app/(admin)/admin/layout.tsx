@@ -65,10 +65,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     return (
         <Layout hasSider style={{ height: "100vh", overflow: "hidden", background: antToken.colorBgLayout }}>
             <Layout.Sider width={adminLayoutStyle.siderWidth} style={{ height: "100vh", overflow: "hidden", background: antToken.colorBgContainer, borderRight: `1px solid ${antToken.colorBorder}` }}>
-                <Flex align="center" gap={12} style={{ height: adminLayoutStyle.brandHeight, padding: "0 20px", borderBottom: `1px solid ${antToken.colorBorderSecondary}` }}>
-                    <span aria-hidden style={{ display: "inline-block", width: 30, height: 30, background: antToken.colorText, WebkitMask: "url(/logo.svg) center / contain no-repeat", mask: "url(/logo.svg) center / contain no-repeat" }} />
-                    <Typography.Text strong style={{ fontSize: 18, letterSpacing: 0 }}>
-                        无限画布
+                <Flex align="center" gap={10} style={{ height: adminLayoutStyle.brandHeight, padding: "0 16px", borderBottom: `1px solid ${antToken.colorBorderSecondary}` }}>
+                    <img src="/logo-square.png" alt="新元宝视频工作台" style={{ width: 28, height: 28, objectFit: "contain", borderRadius: 6 }} />
+                    <Typography.Text strong style={{ fontSize: 16, letterSpacing: 0, whiteSpace: "nowrap" }}>
+                        新元宝视频工作台
                     </Typography.Text>
                 </Flex>
                 <Menu

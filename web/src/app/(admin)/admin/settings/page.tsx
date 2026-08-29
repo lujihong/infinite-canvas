@@ -829,13 +829,7 @@ export default function AdminSettingsPage() {
                                 <Form.Item name="protocol" label="协议">
                                     <Select
                                         options={[
-                                            { label: "OpenAI", value: "openai" },
-                                            { label: "Gemini", value: "gemini" },
-                                            { label: "Grok2API", value: "grok2api" },
-                                            { label: "MiniMax & METASO", value: "metaso" },
-                                            { label: "APIMart", value: "apimart" },
-                                            { label: "KIE", value: "kie" },
-                                            { label: "MiMo", value: "mimo" },
+                                            { label: "OpenAI (兼容 New API)", value: "openai" },
                                         ]}
                                         onChange={(protocol: AdminModelChannel["protocol"]) => {
                                             channelForm.setFieldValue("baseUrl", modelChannelDefaultBaseUrls[protocol]);

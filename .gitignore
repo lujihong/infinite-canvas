@@ -9,3 +9,8 @@ data/
 *.tsbuildinfo
 .DS_Store
 .idea
+server
+custom_build/
+*.pid
+web/pnpm-lock.yaml
+web/pnpm-workspace.yaml
