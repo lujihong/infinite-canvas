@@ -22,8 +22,11 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const editing = editingId === project.id;
     const selected = selectedIds.includes(project.id);
     const open = () => router.push(`/canvas/${project.id}`);
+    const displayTitle = project.title || (project as { name?: string }).name || "新元宝画布";
+    const nodeCount = project.nodes?.length ?? 0;
+    const connectionCount = project.connections?.length ?? 0;
     const saveTitle = () => {
-        renameProject(project.id, editingTitle);
+        renameProject(project.id, editingTitle.trim() || displayTitle);
         stopEditing();
     };
 
@@ -36,7 +39,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                     onClick={(event) => event.stopPropagation()}
                     onChange={(event) => toggleSelected(project.id, event.target.checked)}
                     className="mt-1 size-4 accent-stone-950 dark:accent-stone-100"
-                    aria-label={`选择 ${project.title}`}
+                    aria-label={`选择 ${displayTitle}`}
                 />
                 {editing ? (
                     <Input className="min-w-0" value={editingTitle} onClick={(event) => event.stopPropagation()} onChange={(event) => setEditingTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveTitle()} autoFocus />
@@ -49,15 +52,17 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                             open();
                         }}
                     >
-                        <h2 className="truncate text-xl font-semibold">{project.title}</h2>
+                        <h2 className="truncate text-xl font-semibold">{displayTitle}</h2>
                         <p className="mt-3 text-sm leading-6 text-stone-600 dark:text-stone-400">
-                            {project.nodes.length} 个节点 · {project.connections.length} 条连线
+                            {nodeCount} 个节点 · {connectionCount} 条连线
                         </p>
                     </button>
                 )}
             </div>
             <div className="mt-8 flex items-end justify-between gap-3">
-                <p className="text-xs text-stone-500">更新于 {new Date(project.updatedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
+                <p className="text-xs text-stone-500">
+                    更新于 {Number.isNaN(Date.parse(project.updatedAt || "")) ? "刚刚" : new Date(project.updatedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </p>
                 <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
                     {editing ? (
                         <>
@@ -66,8 +71,8 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
                         </>
                     ) : (
                         <>
-                            <Button type="text" size="small" shape="circle" icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects([project], project.title || "无限画布")} aria-label="导出" />
-                            <Button type="text" size="small" shape="circle" icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, project.title)} aria-label="重命名" />
+                            <Button type="text" size="small" shape="circle" icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects([project], displayTitle)} aria-label="导出" />
+                            <Button type="text" size="small" shape="circle" icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, displayTitle)} aria-label="重命名" />
                             <Button type="text" size="small" shape="circle" icon={<Trash2 className="size-4" />} onClick={() => setDeleteIds([project.id])} aria-label="删除" />
                         </>
                     )}

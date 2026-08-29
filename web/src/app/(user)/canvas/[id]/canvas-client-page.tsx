@@ -58,7 +58,7 @@ import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type AssetPickerTab } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CANVAS_ASSET_DRAG_TYPE, CanvasSidePanel } from "../components/canvas-side-panel";
-import { DEFAULT_CANVAS_AGENT_PANEL, DEFAULT_CANVAS_SIDE_PANEL, useCanvasStore } from "../stores/use-canvas-store";
+import { DEFAULT_CANVAS_AGENT_PANEL, DEFAULT_CANVAS_SIDE_PANEL, normalizeCanvasProject, useCanvasStore } from "../stores/use-canvas-store";
 import { assistantReferenceContentFromNode, buildNodeMentionReferences, isCanvasReferenceNode } from "../utils/canvas-resource-references";
 import { buildCanvasAgentContext } from "../agent/canvas-agent-context";
 import type { CanvasAgentAction, CanvasAgentToolResult } from "../agent/canvas-agent-tools";
@@ -492,23 +492,38 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setInitialAgentRequest(null);
         setReferencePickerNodeId(null);
         consumedAgentRequestProjectRef.current = null;
-        const project = openProject(projectId);
-        if (!project) {
+        const rawProject = openProject(projectId);
+        if (!rawProject) {
             router.replace("/canvas");
             return;
         }
+        const project = normalizeCanvasProject(rawProject);
 
         const restore = async () => {
-            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
+            const rawNodes = Array.isArray(project.nodes) ? project.nodes : [];
+            const safeRawNodes = rawNodes.map((n) => ({
+                ...n,
+                position: n.position && typeof n.position.x === "number" && typeof n.position.y === "number" ? n.position : { x: 0, y: 0 },
+                width: Number(n.width) || 320,
+                height: Number(n.height) || 320,
+            }));
+            const rawConnections = Array.isArray(project.connections) ? project.connections : [];
+            const hydratedNodes = await hydrateCanvasImages(resetInterruptedGeneration(safeRawNodes));
+            const restoredNodes = (hydratedNodes || []).map((n) => ({
+                ...n,
+                position: n.position && typeof n.position.x === "number" && typeof n.position.y === "number" ? n.position : { x: 0, y: 0 },
+                width: Number(n.width) || 320,
+                height: Number(n.height) || 320,
+            }));
             const restoredSessions = syncAssistantReferences(project.chatSessions || [], restoredNodes, true);
             setNodes(restoredNodes);
-            setConnections(project.connections);
+            setConnections(rawConnections);
             setChatSessions(restoredSessions);
             setActiveChatId(project.activeChatId || null);
             setAgentConfig(project.agentConfig || null);
-            setBackgroundMode(project.backgroundMode);
+            setBackgroundMode(project.backgroundMode || "lines");
             setShowImageInfo(project.showImageInfo || false);
-            setViewport(project.viewport);
+            setViewport(project.viewport || { x: 0, y: 0, k: 1 });
             setSidePanel(project.sidePanel || DEFAULT_CANVAS_SIDE_PANEL);
             const restoredAgentPanel = project.agentPanel || DEFAULT_CANVAS_AGENT_PANEL;
             setAgentPanel(restoredAgentPanel);
@@ -520,8 +535,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             }
             lastHistoryRef.current = {
                 nodes: restoredNodes,
-                connections: project.connections,
-                backgroundMode: project.backgroundMode,
+                connections: rawConnections,
+                backgroundMode: project.backgroundMode || "lines",
                 showImageInfo: project.showImageInfo || false,
             };
             setHistoryState({ canUndo: false, canRedo: false });
@@ -1292,7 +1307,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, [applyHistory]);
 
     const createAndOpenProject = useCallback(() => {
-        const id = createProject(`无限画布 ${useCanvasStore.getState().projects.length + 1}`);
+        const id = createProject(`新元宝项目 ${useCanvasStore.getState().projects.length + 1}`);
         router.push(`/canvas/${id}`);
     }, [createProject, router]);
 

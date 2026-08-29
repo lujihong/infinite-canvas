@@ -110,13 +110,15 @@ async function reconcileCanvasProjects(
     remoteProjects: CanvasProject[],
     localProjects: CanvasProject[],
 ) {
+    const normalizedRemote = (remoteProjects || []).map(normalizeCanvasProject);
+    const normalizedLocal = (localProjects || []).map(normalizeCanvasProject);
     const remoteById = new Map(
-        remoteProjects.map((project) => [project.id, project]),
+        normalizedRemote.map((project) => [project.id, project]),
     );
-    const missingProjects = localProjects.filter(
+    const missingProjects = normalizedLocal.filter(
         (project) => !remoteById.has(project.id),
     );
-    const existingLocalProjects = localProjects.filter((project) =>
+    const existingLocalProjects = normalizedLocal.filter((project) =>
         remoteById.has(project.id),
     );
     const projects = missingProjects.length
@@ -128,11 +130,11 @@ async function reconcileCanvasProjects(
                 ),
             )
             .catch(() =>
-                mergeCanvasProjects(remoteProjects, localProjects),
+                mergeCanvasProjects(normalizedRemote, normalizedLocal),
             )
-        : mergeCanvasProjects(remoteProjects, existingLocalProjects);
+        : mergeCanvasProjects(normalizedRemote, existingLocalProjects);
 
-    localProjects.forEach((project) => {
+    normalizedLocal.forEach((project) => {
         const remote = remoteById.get(project.id);
         if (
             remote &&
@@ -146,6 +148,126 @@ async function reconcileCanvasProjects(
     return projects;
 }
 
+export function normalizeCanvasProject(raw: unknown): CanvasProject {
+    const now = new Date().toISOString();
+    if (!raw || typeof raw !== "object") {
+        return {
+            id: nanoid(),
+            title: "新元宝项目",
+            createdAt: now,
+            updatedAt: now,
+            nodes: [],
+            connections: [],
+            chatSessions: [],
+            activeChatId: null,
+            agentConfig: null,
+            autoTitlePending: false,
+            backgroundMode: "lines",
+            showImageInfo: false,
+            viewport: initialViewport,
+            sidePanel: DEFAULT_CANVAS_SIDE_PANEL,
+            agentPanel: DEFAULT_CANVAS_AGENT_PANEL,
+        };
+    }
+
+    const item = raw as Partial<CanvasProject> & { name?: string; edges?: unknown };
+    const title =
+        typeof item.title === "string" && item.title.trim()
+            ? item.title.trim()
+            : typeof item.name === "string" && item.name.trim()
+                ? item.name.trim()
+                : "新元宝项目";
+
+    const rawConnections = Array.isArray(item.connections)
+        ? item.connections
+        : Array.isArray(item.edges)
+            ? item.edges
+            : [];
+    const connections: CanvasConnection[] = rawConnections
+        .map((rawConn) => {
+            if (!rawConn || typeof rawConn !== "object") return null;
+            const c = rawConn as Partial<CanvasConnection> & { source?: string; target?: string; from?: string; to?: string };
+            const sourceNodeId = c.sourceNodeId || c.source || c.from || "";
+            const targetNodeId = c.targetNodeId || c.target || c.to || "";
+            if (!sourceNodeId || !targetNodeId) return null;
+            return {
+                id: typeof c.id === "string" && c.id ? c.id : nanoid(),
+                sourceNodeId,
+                targetNodeId,
+                sourceHandle: c.sourceHandle,
+                targetHandle: c.targetHandle,
+            } as CanvasConnection;
+        })
+        .filter(Boolean) as CanvasConnection[];
+
+    const rawNodes = Array.isArray(item.nodes) ? item.nodes : [];
+    const nodes: CanvasNodeData[] = rawNodes
+        .map((rawNode) => {
+            if (!rawNode || typeof rawNode !== "object") return null;
+            const n = rawNode as Partial<CanvasNodeData> & { x?: number; y?: number };
+            const position =
+                n.position && typeof n.position === "object"
+                    ? { x: Number(n.position.x) || 0, y: Number(n.position.y) || 0 }
+                    : { x: Number(n.x) || 0, y: Number(n.y) || 0 };
+            return {
+                id: typeof n.id === "string" && n.id ? n.id : nanoid(),
+                type: n.type || CanvasNodeType.Image,
+                title: n.title || "未命名节点",
+                position,
+                width: Number(n.width) || 320,
+                height: Number(n.height) || 320,
+                metadata: n.metadata && typeof n.metadata === "object" ? n.metadata : {},
+            } as CanvasNodeData;
+        })
+        .filter(Boolean) as CanvasNodeData[];
+
+    const chatSessions = Array.isArray(item.chatSessions) ? (item.chatSessions as CanvasAssistantSession[]) : [];
+
+    const viewport: ViewportTransform =
+        item.viewport && typeof item.viewport === "object" && typeof item.viewport.k === "number"
+            ? {
+                x: Number(item.viewport.x) || 0,
+                y: Number(item.viewport.y) || 0,
+                k: Number(item.viewport.k) || 1,
+            }
+            : initialViewport;
+
+    const sidePanel: CanvasSidePanelState =
+        item.sidePanel && typeof item.sidePanel === "object"
+            ? {
+                open: Boolean(item.sidePanel.open),
+                width: typeof item.sidePanel.width === "number" ? item.sidePanel.width : DEFAULT_CANVAS_SIDE_PANEL.width,
+            }
+            : DEFAULT_CANVAS_SIDE_PANEL;
+
+    const agentPanel: CanvasSidePanelState =
+        item.agentPanel && typeof item.agentPanel === "object"
+            ? {
+                open: Boolean(item.agentPanel.open),
+                width: typeof item.agentPanel.width === "number" ? item.agentPanel.width : DEFAULT_CANVAS_AGENT_PANEL.width,
+            }
+            : DEFAULT_CANVAS_AGENT_PANEL;
+
+    return {
+        id: typeof item.id === "string" && item.id.trim() ? item.id.trim() : nanoid(),
+        title,
+        createdAt: item.createdAt || now,
+        updatedAt: item.updatedAt || now,
+        nodes,
+        connections,
+        chatSessions,
+        activeChatId: typeof item.activeChatId === "string" ? item.activeChatId : null,
+        agentConfig: item.agentConfig ?? null,
+        autoTitlePending: Boolean(item.autoTitlePending),
+        pendingAgentRequest: item.pendingAgentRequest,
+        backgroundMode: item.backgroundMode === "dots" || item.backgroundMode === "lines" || item.backgroundMode === "blank" ? item.backgroundMode : "lines",
+        showImageInfo: Boolean(item.showImageInfo),
+        viewport,
+        sidePanel,
+        agentPanel,
+    };
+}
+
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
         await waitForUserStoreHydration();
@@ -154,17 +276,22 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         const localParsed = localValue
             ? (JSON.parse(localValue) as StorageValue<CanvasStore>)
             : null;
-        const localProjects =
+        const rawLocalProjects =
             (localParsed?.state as PersistedCanvasState)?.projects || [];
-        const localHasData =
-            Array.isArray(localProjects) && localProjects.length > 0;
+        const localProjects = (
+            Array.isArray(rawLocalProjects) ? rawLocalProjects : []
+        ).map(normalizeCanvasProject);
+        const localHasData = localProjects.length > 0;
 
         if (token) {
             try {
-                const [userConfig, remoteProjects] = await Promise.all([
+                const [userConfig, rawRemoteProjects] = await Promise.all([
                     fetchUserConfig(token),
                     listCanvasProjects(token),
                 ]);
+                const remoteProjects = (
+                    Array.isArray(rawRemoteProjects) ? rawRemoteProjects : []
+                ).map(normalizeCanvasProject);
                 accountCanvasSyncEnabled =
                     userConfig.syncCapabilities?.userData === true;
 
@@ -213,8 +340,12 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         }
 
         if (!localParsed) return null;
-        queuedPersistState = localParsed.state as PersistedCanvasState;
-        return localParsed;
+        const nextState = { projects: localProjects };
+        queuedPersistState = nextState;
+        return {
+            ...localParsed,
+            state: nextState,
+        };
     },
 
     setItem: (name, value) => {
@@ -240,12 +371,12 @@ export const useCanvasStore = create<CanvasStore>()(
         (set, get) => ({
             hydrated: false,
             projects: [],
-            createProject: (title = "未命名画布", options) => {
+            createProject: (title = "新元宝项目", options) => {
                 const now = new Date().toISOString();
                 const id = nanoid();
-                const project: CanvasProject = {
+                const project = normalizeCanvasProject({
                     id,
-                    title,
+                    title: title || `新元宝项目 ${get().projects.length + 1}`,
                     createdAt: now,
                     updatedAt: now,
                     nodes: [],
@@ -260,7 +391,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     viewport: initialViewport,
                     sidePanel: DEFAULT_CANVAS_SIDE_PANEL,
                     agentPanel: options?.pendingAgentRequest ? { ...DEFAULT_CANVAS_AGENT_PANEL, open: true } : DEFAULT_CANVAS_AGENT_PANEL,
-                };
+                });
                 set((state) => ({
                     projects: [project, ...state.projects],
                 }));
@@ -269,7 +400,7 @@ export const useCanvasStore = create<CanvasStore>()(
             },
             importProject: (source) => {
                 const now = new Date().toISOString();
-                const project: CanvasProject = {
+                const project = normalizeCanvasProject({
                     id: nanoid(),
                     title: source.title || "导入画布",
                     createdAt: source.createdAt || now,
@@ -285,26 +416,28 @@ export const useCanvasStore = create<CanvasStore>()(
                     viewport: source.viewport || initialViewport,
                     sidePanel: source.sidePanel || DEFAULT_CANVAS_SIDE_PANEL,
                     agentPanel: source.agentPanel || DEFAULT_CANVAS_AGENT_PANEL,
-                };
+                });
                 set((state) => ({
                     projects: [project, ...state.projects],
                 }));
                 queueProjectSave(project);
                 return project.id;
             },
-            openProject: (id) =>
-                get().projects.find((item) => item.id === id) || null,
+            openProject: (id) => {
+                const found = get().projects.find((item) => item.id === id);
+                return found ? normalizeCanvasProject(found) : null;
+            },
             renameProject: (id, title) => {
                 const project = get().projects.find(
                     (item) => item.id === id,
                 );
                 if (!project) return;
-                const nextProject = {
+                const nextProject = normalizeCanvasProject({
                     ...project,
                     title: title.trim() || project.title,
                     autoTitlePending: false,
                     updatedAt: new Date().toISOString(),
-                };
+                });
                 set((state) => ({
                     projects: state.projects.map((item) =>
                         item.id === id ? nextProject : item,
@@ -325,11 +458,11 @@ export const useCanvasStore = create<CanvasStore>()(
                     (item) => item.id === id,
                 );
                 if (!project) return;
-                const nextProject = {
+                const nextProject = normalizeCanvasProject({
                     ...project,
                     ...patch,
                     updatedAt: new Date().toISOString(),
-                };
+                });
                 set((state) => ({
                     projects: state.projects.map((item) =>
                         item.id === id ? nextProject : item,
@@ -341,10 +474,13 @@ export const useCanvasStore = create<CanvasStore>()(
                 accountCanvasSyncEnabled = syncEnabled;
                 if (!syncEnabled) return;
                 const localProjects = get().projects;
-                const remoteProjects = await listCanvasProjects(token).catch(
+                const rawRemoteProjects = await listCanvasProjects(token).catch(
                     () => null,
                 );
-                if (!remoteProjects) return;
+                if (!rawRemoteProjects) return;
+                const remoteProjects = (
+                    Array.isArray(rawRemoteProjects) ? rawRemoteProjects : []
+                ).map(normalizeCanvasProject);
                 const projects = await reconcileCanvasProjects(
                     token,
                     remoteProjects,
@@ -385,16 +521,18 @@ export function mergeCanvasProjects(
     localProjects: CanvasProject[],
 ): CanvasProject[] {
     const projects = new Map<string, CanvasProject>();
-    [...localProjects, ...remoteProjects].forEach((project) => {
-        const previous = projects.get(project.id);
-        if (
-            !previous ||
-            Date.parse(project.updatedAt || "") >=
-            Date.parse(previous.updatedAt || "")
-        ) {
-            projects.set(project.id, project);
-        }
-    });
+    [...(localProjects || []), ...(remoteProjects || [])]
+        .map(normalizeCanvasProject)
+        .forEach((project) => {
+            const previous = projects.get(project.id);
+            if (
+                !previous ||
+                Date.parse(project.updatedAt || "") >=
+                Date.parse(previous.updatedAt || "")
+            ) {
+                projects.set(project.id, project);
+            }
+        });
     return Array.from(projects.values()).sort(
         (a, b) =>
             Date.parse(b.updatedAt || "") -
