@@ -763,7 +763,6 @@ export default function AdminSettingsPage() {
                                             title: "操作",
                                             key: "actions",
                                             width: 220,
-                                            align: "right",
                                             render: (_, item) => (
                                                 <Space size={4}>
                                                     <Button size="small" onClick={() => openTestDialog(item._index)}>
@@ -961,7 +960,6 @@ export default function AdminSettingsPage() {
                                     title: "操作",
                                     key: "actions",
                                     width: 120,
-                                    align: "right",
                                     render: (_, item) => (
                                         <Button size="small" loading={testingModels.includes(item.model)} onClick={() => void testModelOnline(item.model)}>
                                             测试
