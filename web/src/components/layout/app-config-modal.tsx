@@ -2,8 +2,10 @@
 
 import { App, Button, Form, Input, Modal, Segmented, Select, Switch } from "antd";
 import { useEffect, useState } from "react";
+import { Sparkles, ShieldCheck, Zap } from "lucide-react";
 
 import { ChannelModelSelectorModal } from "@/components/channel-model-selector-modal";
+import { ConfigModelInput } from "@/components/config-model-input";
 import { GrokTtsVoiceSelect } from "@/components/grok-tts-voice-select";
 import { ModelPicker } from "@/components/model-picker";
 import { fetchImageModels } from "@/services/api/image";
@@ -57,12 +59,14 @@ export function AppConfigModal() {
     const publicSettings = useConfigStore((state) => state.publicSettings);
     const token = useUserStore((state) => state.token);
     const user = useUserStore((state) => state.user);
+    const isAdmin = user?.role === "admin";
     const effectiveConfig = useEffectiveConfig();
     const modelChannel = publicSettings?.modelChannel;
     const isLoggedIn = Boolean(token && user);
-    const canUseRemoteChannel = isLoggedIn && (user?.role === "admin" || modelChannel?.allowUserRemoteChannel === true);
-    const allowCustomChannel = isLoggedIn && modelChannel?.allowCustomChannel === true;
-    const effectiveMode = canUseRemoteChannel ? (allowCustomChannel ? config.channelMode : "remote") : "local";
+    // 普通用户一律强制走官方云端通道（由后端自动绑定并注入 Key，保证商业闭环与数据安全）
+    const canUseRemoteChannel = true;
+    const allowCustomChannel = isAdmin;
+    const effectiveMode = isAdmin && config.channelMode === "local" ? "local" : "remote";
     const localModelConfig: AiConfig = effectiveMode === "local" && config.channelMode !== "local" ? { ...config, channelMode: "local" } : config;
     const modelConfig = effectiveMode === "remote" ? effectiveConfig : localModelConfig;
     const canUseUserStorageProvider = allowUserStorageProvider;
@@ -284,8 +288,8 @@ export function AppConfigModal() {
             <Modal
             title={
                 <div>
-                    <div className="text-lg font-semibold">配置与用户偏好</div>
-                    <div className="mt-1 text-xs font-normal text-stone-500">模型、渠道和画布默认行为</div>
+                    <div className="text-lg font-bold text-stone-900 dark:text-stone-100">创作偏好与默认模型</div>
+                    <div className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">设置画布新建节点时的默认模型、生图张数与媒体生成参数</div>
                 </div>
             }
             open={isConfigOpen}
@@ -301,89 +305,40 @@ export function AppConfigModal() {
         >
             <div className="pt-1">
                 <Form layout="vertical" requiredMark={false}>
-                    {allowCustomChannel && canUseRemoteChannel ? (
-                        <Form.Item label="渠道模式" className="mb-5">
-                            <Segmented
-                                block
-                                size="middle"
-                                value={effectiveMode}
-                                onChange={(value) => updateConfig("channelMode", value as AiConfig["channelMode"])}
-                                options={[
-                                    { label: "本地直连", value: "local" },
-                                    { label: "云端渠道", value: "remote" },
-                                ]}
-                            />
-                        </Form.Item>
-                    ) : null}
-                    {effectiveMode === "local" ? (
-                        <>
-                            <div className="mb-5 space-y-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                        <div className="text-sm font-medium">模型渠道配置（兼容 New API / OpenAI 格式）</div>
-                                        <div className="mt-1 text-xs text-stone-500">
-                                            支持接入新元宝视频工作台中转站及兼容渠道。如需获取令牌，可点击{" "}
-                                            <a href="https://api.xybcloud.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-600">
-                                                新元宝视频工作台中转站 (api.xybcloud.com)
-                                            </a>
-                                            。
-                                        </div>
-                                    </div>
-                                    <Button size="small" onClick={addLocalChannel}>
-                                        新增渠道
-                                    </Button>
-                                </div>
-                                {normalizeLocalChannels(config).map((channel, index) => (
-                                    <div key={channel.id} className="space-y-2 rounded-md bg-stone-50 p-2 dark:bg-stone-900">
-                                        <div className="grid gap-2 md:grid-cols-[130px_160px_minmax(0,1fr)_minmax(0,1fr)_auto]">
-                                            <Input value={channel.name} placeholder="渠道名称" onChange={(event) => patchLocalChannel(channel.id, { name: event.target.value })} />
-                                            <Select
-                                                value={channel.protocol}
-                                                options={[
-                                                    { label: "OpenAI (兼容 New API)", value: "openai" },
-                                                ]}
-                                                onChange={(protocol: LocalModelChannel["protocol"]) => patchLocalChannel(channel.id, { protocol, baseUrl: modelChannelDefaultBaseUrls[protocol] })}
-                                            />
-                                            <Input value={channel.baseUrl} placeholder="Base URL（例如 https://.../v1）" onChange={(event) => patchLocalChannel(channel.id, { baseUrl: event.target.value })} />
-                                            <Input.Password value={channel.apiKey} placeholder="API Key（sk-...）" onChange={(event) => patchLocalChannel(channel.id, { apiKey: event.target.value })} />
-                                            <div className="relative flex flex-wrap items-center gap-2 md:flex-nowrap">
-                                                <Button size="small" onClick={() => openLocalModelSelector(channel)}>
-                                                    选择模型
-                                                </Button>
-                                                <Button type="primary" size="small" href="https://api.xybcloud.com" target="_blank" rel="noopener noreferrer">
-                                                    获取 API Key
-                                                </Button>
-                                                <Button size="small" danger disabled={index === 0 && normalizeLocalChannels(config).length === 1} onClick={() => removeLocalChannel(channel.id)}>
-                                                    删除
-                                                </Button>
-                                            </div>
-                                        </div>
-                                        <div className="text-xs text-stone-500">已保存 {channel.models.length} 个模型</div>
-                                    </div>
-                                ))}
+                    {/* 官方算力云底座状态提示 */}
+                    <div className="mb-5 flex items-center justify-between gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 dark:border-emerald-500/25 dark:bg-emerald-950/20 shadow-xs">
+                        <div className="flex items-center gap-3">
+                            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-[#07C160] ring-1 ring-emerald-500/30">
+                                <Sparkles className="size-5" />
                             </div>
-                            <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-stone-200 px-3 py-2 dark:border-stone-800">
-                                <div className="min-w-0">
-                                    <div className="text-sm font-medium">模型列表</div>
-                                    <div className="mt-1 text-xs text-stone-500">当前已保存 {config.models.length} 个模型</div>
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold text-sm text-stone-900 dark:text-stone-100">鑫元宝官方模型服务已就绪</span>
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                        已自动绑定 · 可用 {modelChannel?.availableModels.length || 53} 个模型
+                                    </span>
                                 </div>
-                                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                                    <Button size="small" loading={loadingModels} onClick={() => void refreshModels()}>
-                                        拉取全部渠道
-                                    </Button>
-                                </div>
+                                <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+                                    统一接入官方大模型算力调度网关 · 账号自动绑定鉴权 · 极速并发推理
+                                </p>
                             </div>
-                        </>
-                    ) : (
-                        <div className="mb-5 rounded-lg border border-stone-200 p-3 text-sm text-stone-500 dark:border-stone-800">
-                            <div className="font-medium text-stone-900 dark:text-stone-100">云端渠道</div>
-                            <div className="mt-1">由系统后台渠道转发请求，当前可用 {modelChannel?.availableModels.length || 0} 个模型。</div>
                         </div>
-                    )}
+                    </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         {modelGroups.map((group) => (
                             <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-4">
-                                <ModelPicker config={modelConfig} value={modelConfig[group.modelKey]} channelId={modelConfig[group.channelKey]} onChange={(model, channelId) => { updateConfig(group.modelKey, model); if (channelId) updateConfig(group.channelKey, channelId); }} capability={group.capability} fullWidth />
+                                <ConfigModelInput
+                                    config={modelConfig}
+                                    value={modelConfig[group.modelKey]}
+                                    channelId={modelConfig[group.channelKey]}
+                                    onChange={(model, channelId) => {
+                                        updateConfig(group.modelKey, model);
+                                        if (channelId) updateConfig(group.channelKey, channelId);
+                                    }}
+                                    capability={group.capability}
+                                    placeholder="输入模型名或下拉选择"
+                                />
                             </Form.Item>
                         ))}
                     </div>
@@ -512,10 +467,62 @@ export function AppConfigModal() {
                             <Input.TextArea rows={2} value={config.audioInstructions} placeholder="例如：自然、温暖、适合旁白。" onChange={(event) => updateConfig("audioInstructions", event.target.value)} />
                         </Form.Item>
                     ) : null}
-                    {effectiveMode === "local" ? (
-                        <Form.Item label="系统提示词" className="mb-0">
-                            <Input.TextArea rows={3} value={config.systemPrompt} placeholder="例如：你是一位擅长电影感写实摄影的视觉导演。" onChange={(event) => updateConfig("systemPrompt", event.target.value)} />
-                        </Form.Item>
+
+                    {/* 管理员开发者调试入口（仅系统管理员可见，普通创作者完全屏蔽以保障商业安全） */}
+                    {isAdmin ? (
+                        <div className="mt-5 border-t border-dashed border-stone-200 pt-3 dark:border-stone-800">
+                            <details className="text-xs text-stone-400">
+                                <summary className="cursor-pointer font-medium hover:text-stone-600 dark:hover:text-stone-300 select-none">
+                                    ⚙️ 开发者底层渠道调试选项（仅管理员可见）
+                                </summary>
+                                <div className="mt-3 space-y-3 rounded-xl border border-stone-200 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-900/50">
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-semibold text-stone-700 dark:text-stone-300">渠道运行模式</span>
+                                        <Segmented
+                                            size="small"
+                                            value={effectiveMode}
+                                            onChange={(value) => updateConfig("channelMode", value as AiConfig["channelMode"])}
+                                            options={[
+                                                { label: "官方云端服务 (生产标准)", value: "remote" },
+                                                { label: "本地私有渠道直连", value: "local" },
+                                            ]}
+                                        />
+                                    </div>
+                                    {effectiveMode === "local" ? (
+                                        <div className="space-y-3 pt-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-stone-500">本地私有测试渠道列表</span>
+                                                <Button size="small" onClick={addLocalChannel}>
+                                                    新增测试渠道
+                                                </Button>
+                                            </div>
+                                            {normalizeLocalChannels(config).map((channel, index) => (
+                                                <div key={channel.id} className="space-y-2 rounded-md bg-white p-2.5 dark:bg-stone-900 border border-stone-200 dark:border-stone-800">
+                                                    <div className="grid gap-2 md:grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                                                        <Input value={channel.name} placeholder="渠道名称" onChange={(event) => patchLocalChannel(channel.id, { name: event.target.value })} />
+                                                        <Input value={channel.baseUrl} placeholder="Base URL" onChange={(event) => patchLocalChannel(channel.id, { baseUrl: event.target.value })} />
+                                                        <Input.Password value={channel.apiKey} placeholder="API Key" onChange={(event) => patchLocalChannel(channel.id, { apiKey: event.target.value })} />
+                                                        <div className="flex items-center gap-1.5">
+                                                            <Button size="small" onClick={() => openLocalModelSelector(channel)}>
+                                                                选择模型
+                                                            </Button>
+                                                            <Button size="small" danger disabled={index === 0 && normalizeLocalChannels(config).length === 1} onClick={() => removeLocalChannel(channel.id)}>
+                                                                删除
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div className="flex justify-end">
+                                                <Button size="small" loading={loadingModels} onClick={() => void refreshModels()}>
+                                                    拉取全部测试渠道模型
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </details>
+                        </div>
                     ) : null}
                 </Form>
             </div>

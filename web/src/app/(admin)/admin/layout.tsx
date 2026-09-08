@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { useEffect } from "react";
 
 import { UserStatusActions } from "@/components/layout/user-status-actions";
+import { BrandLogo } from "@/components/layout/brand-logo";
 import { adminLayoutStyle } from "@/lib/app-theme";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -57,6 +58,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         }
     }, [isReady, router, token, user?.role]);
 
+    const handleLogout = () => {
+        logout();
+        if (typeof window !== "undefined") {
+            window.location.href = "/login";
+        }
+    };
+
     if (!isReady || !token || user?.role !== "admin") {
         return (
             <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", background: antToken.colorBgLayout }}>
@@ -68,11 +76,16 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     return (
         <Layout hasSider style={{ height: "100vh", overflow: "hidden", background: antToken.colorBgLayout }}>
             <Layout.Sider width={adminLayoutStyle.siderWidth} style={{ height: "100vh", overflow: "hidden", background: antToken.colorBgContainer, borderRight: `1px solid ${antToken.colorBorder}` }}>
-                <Flex align="center" gap={10} style={{ height: adminLayoutStyle.brandHeight, padding: "0 16px", borderBottom: `1px solid ${antToken.colorBorderSecondary}` }}>
-                    <img src="/logo-square.png" alt="新元宝视频工作台" style={{ width: 28, height: 28, objectFit: "contain", borderRadius: 6 }} />
-                    <Typography.Text strong style={{ fontSize: 16, letterSpacing: 0, whiteSpace: "nowrap" }}>
-                        新元宝视频工作台
-                    </Typography.Text>
+                <Flex align="center" gap={10} style={{ height: adminLayoutStyle.brandHeight, padding: "0 14px", borderBottom: `1px solid ${antToken.colorBorderSecondary}`, overflow: "hidden" }}>
+                    <BrandLogo className="h-7 w-auto max-w-[64px] shrink-0" alt="鑫元宝视频创作工作台" />
+                    <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+                        <Typography.Text strong style={{ fontSize: 13, lineHeight: "17px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            鑫元宝视频创作工作台
+                        </Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 11, lineHeight: "14px" }}>
+                            管理后台
+                        </Typography.Text>
+                    </div>
                 </Flex>
                 <Menu
                     mode="inline"
@@ -92,21 +105,21 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     <Button block icon={<HomeOutlined />} href="/canvas" target="_blank" rel="noreferrer">
                         前往画布
                     </Button>
-                    <Button block icon={<LogoutOutlined />} onClick={logout}>
+                    <Button block icon={<LogoutOutlined />} onClick={handleLogout}>
                         退出登录
                     </Button>
                 </Flex>
             </Layout.Sider>
             <Layout style={{ background: antToken.colorBgLayout }}>
                 <Layout.Header
-                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: adminLayoutStyle.headerHeight, padding: "0 24px", background: antToken.colorBgContainer, borderBottom: `1px solid ${antToken.colorBorder}` }}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: adminLayoutStyle.headerHeight, padding: "0 24px", background: antToken.colorBgContainer, borderBottom: `1px solid ${antToken.colorBorder}`, lineHeight: 1 }}
                 >
                     <Typography.Title level={5} style={{ margin: 0 }}>
                         {pageTitle}
                     </Typography.Title>
-                    <Flex align="center" gap={4}>
+                    <div className="inline-flex items-center leading-none">
                         <UserStatusActions showConfig={false} />
-                    </Flex>
+                    </div>
                 </Layout.Header>
                 <Layout.Content style={{ minHeight: 0, overflow: "auto" }}>{children}</Layout.Content>
             </Layout>

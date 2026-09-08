@@ -10,6 +10,9 @@ type UserStore = {
     user: AuthUser | null;
     isReady: boolean;
     isLoading: boolean;
+    isLoginModalOpen: boolean;
+    openLoginModal: () => void;
+    closeLoginModal: () => void;
     setSession: (token: string, user: AuthUser) => void;
     clearSession: () => void;
     hydrateUser: () => Promise<void>;
@@ -24,8 +27,36 @@ export const useUserStore = create<UserStore>()(
             user: null,
             isReady: false,
             isLoading: false,
-            setSession: (token, user) => set({ token, user, isReady: true }),
-            clearSession: () => set({ token: "", user: null, isReady: true }),
+            isLoginModalOpen: false,
+            openLoginModal: () => set({ isLoginModalOpen: true }),
+            closeLoginModal: () => set({ isLoginModalOpen: false }),
+            setSession: (token, user) => {
+                const prevUser = get().user;
+                if (prevUser && prevUser.id !== user.id) {
+                    // 切换不同用户时，先重置旧用户的内存数据与钱包，并按新用户加载独立工程与配置
+                    import("@/app/(user)/canvas/stores/use-canvas-store").then(({ useCanvasStore }) => useCanvasStore.getState().reset()).catch(() => {});
+                    import("@/stores/use-asset-store").then(({ useAssetStore }) => useAssetStore.getState().reset()).catch(() => {});
+                    import("@/stores/use-config-store").then(({ useConfigStore }) => useConfigStore.getState().loadUserConfig(user.id)).catch(() => {});
+                    import("@/stores/use-wallet-store").then(({ useWalletStore }) => useWalletStore.setState({ wallet: null })).catch(() => {});
+                    import("@/stores/use-editor-store").then(({ useEditorStore }) => useEditorStore.getState().loadUserProject(user.id)).catch(() => {});
+                    import("@/components/layout/app-providers").then(({ appQueryClient }) => appQueryClient.clear()).catch(() => {});
+                } else if (!prevUser) {
+                    import("@/stores/use-config-store").then(({ useConfigStore }) => useConfigStore.getState().loadUserConfig(user.id)).catch(() => {});
+                    import("@/stores/use-editor-store").then(({ useEditorStore }) => useEditorStore.getState().loadUserProject(user.id)).catch(() => {});
+                }
+                set({ token, user, isReady: true, isLoginModalOpen: false });
+            },
+            clearSession: () => {
+                // 退出登录时，彻底重置所有业务 Store 内存、钱包与全局 Query 缓存
+                import("@/app/(user)/canvas/stores/use-canvas-store").then(({ useCanvasStore }) => useCanvasStore.getState().reset()).catch(() => {});
+                import("@/stores/use-asset-store").then(({ useAssetStore }) => useAssetStore.getState().reset()).catch(() => {});
+                import("@/stores/use-config-store").then(({ useConfigStore }) => useConfigStore.getState().reset()).catch(() => {});
+                import("@/stores/use-wallet-store").then(({ useWalletStore }) => useWalletStore.setState({ wallet: null })).catch(() => {});
+                import("@/stores/use-editor-store").then(({ useEditorStore }) => useEditorStore.getState().clearProject()).catch(() => {});
+                import("@/services/image-storage").then(({ clearGuestStorageProviders }) => clearGuestStorageProviders()).catch(() => {});
+                import("@/components/layout/app-providers").then(({ appQueryClient }) => appQueryClient.clear()).catch(() => {});
+                set({ token: "", user: null, isReady: true });
+            },
             hydrateUser: async () => {
                 const token = get().token;
                 if (!token) {

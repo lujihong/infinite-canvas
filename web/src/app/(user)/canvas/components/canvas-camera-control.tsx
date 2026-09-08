@@ -113,10 +113,10 @@ export function CanvasCameraControl({ value, onChange, buttonClassName }: Canvas
 
     return (
         <>
-            <span ref={buttonRef} className="inline-flex min-w-0" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+            <span ref={buttonRef} className="inline-flex min-w-0 shrink-0" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
                 <Button
-                    icon={<Camera className="size-4" />}
-                    className={buttonClassName || "!h-10 !min-w-[92px] !justify-start !rounded-full !px-3"}
+                    icon={<Camera className="size-3.5" />}
+                    className={buttonClassName || "!h-10 !min-w-[84px] !justify-start !rounded-full !px-2.5"}
                     style={{
                         background: value?.enabled ? theme.toolbar.activeBg : theme.node.fill,
                         borderColor: value?.enabled ? theme.node.activeStroke : theme.node.stroke,

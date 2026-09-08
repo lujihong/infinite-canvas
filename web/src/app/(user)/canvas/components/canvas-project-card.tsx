@@ -22,7 +22,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const editing = editingId === project.id;
     const selected = selectedIds.includes(project.id);
     const open = () => router.push(`/canvas/${project.id}`);
-    const displayTitle = project.title || (project as { name?: string }).name || "新元宝画布";
+    const displayTitle = project.title || (project as { name?: string }).name || "新项目";
     const nodeCount = project.nodes?.length ?? 0;
     const connectionCount = project.connections?.length ?? 0;
     const saveTitle = () => {

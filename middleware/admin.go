@@ -46,6 +46,9 @@ func NotFoundJSON(c *gin.Context) {
 func authUser(c *gin.Context) (model.AuthUser, bool) {
 	token := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 	if strings.TrimSpace(token) == "" {
+		token = strings.TrimSpace(c.Query("token"))
+	}
+	if strings.TrimSpace(token) == "" {
 		return model.AuthUser{}, false
 	}
 	return service.CurrentAuthUser(token)

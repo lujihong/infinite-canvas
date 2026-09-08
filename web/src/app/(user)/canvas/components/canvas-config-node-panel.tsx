@@ -6,7 +6,7 @@ import { Button, Segmented } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol, requestCreditCost } from "@/constant/credits";
+import { CreditSymbol, formatModelCostTag, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -34,7 +34,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, videoFram
     const mode = node.metadata?.generationMode || "image";
     const config = buildNodeConfig(globalConfig, node, mode);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? count : 1 });
+    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? count : 1, mode });
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
@@ -124,10 +124,10 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, videoFram
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={() => onGenerate(node.id)}
             >
-                <span className="inline-flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                    <span className="inline-flex items-center gap-1 rounded bg-black/15 px-1.5 py-0.5 text-xs font-semibold dark:bg-white/15">
                         <CreditSymbol />
-                        {credits.toLocaleString()}
+                        <span>{formatModelCostTag({ model: config.model, mode, count, seconds: config.videoSeconds, resolution: config.vquality || config.size, modelCosts })}</span>
                     </span>
                     {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
                     <span>开始生成</span>
@@ -154,9 +154,14 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     const textChannelId = mode === "text" ? channelId || globalConfig.textChannelId : globalConfig.textChannelId;
     const audioChannelId = mode === "audio" ? channelId || globalConfig.audioChannelId : globalConfig.audioChannelId;
     const activeChannelId = mode === "image" ? imageChannelId : mode === "video" ? videoChannelId : mode === "text" ? textChannelId : mode === "audio" ? audioChannelId || globalConfig.activeChannelId : globalConfig.activeChannelId;
+    const chosenModel = node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model);
     return {
         ...globalConfig,
-        model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
+        model: chosenModel,
+        ...(mode === "video" ? { videoModel: chosenModel } : {}),
+        ...(mode === "image" ? { imageModel: chosenModel } : {}),
+        ...(mode === "audio" ? { audioModel: chosenModel } : {}),
+        ...(mode === "text" ? { textModel: chosenModel } : {}),
         activeChannelId,
         imageChannelId,
         videoChannelId,

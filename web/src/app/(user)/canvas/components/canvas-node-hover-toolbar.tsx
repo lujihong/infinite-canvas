@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Settings2, Trash2, Upload, Video } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "../types";
 import { isCanvasImageNodeType, isPanoramaNodeType } from "../utils/canvas-panorama";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
@@ -39,6 +40,7 @@ type CanvasNodeHoverToolbarProps = {
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onDelete: (node: CanvasNodeData) => void;
+    projectId?: string;
 };
 
 type ToolbarTool = {
@@ -77,6 +79,7 @@ export function CanvasNodeHoverToolbar({
     onRetry,
     onToggleFreeResize,
     onDelete,
+    projectId,
 }: CanvasNodeHoverToolbarProps) {
     const [quickToolsConfigs, setQuickToolsConfigs] = useState(() => ({
         [IMAGE_QUICK_TOOLS_STORAGE_KEY]: { ids: defaultImageQuickToolIds, showLabels: true },
@@ -155,6 +158,21 @@ export function CanvasNodeHoverToolbar({
         { id: "delete", title: "移除节点", label: "删除", icon: <Trash2 className="size-4" />, onClick: () => onDelete(node), danger: true },
     ];
     const nodeToolbarTools: ToolbarTool[] = [
+        ...(hasVideo ? [{
+            id: "editVideo",
+            title: "在视频剪辑台中剪辑/配乐",
+            label: "剪辑",
+            icon: <Scissors className="size-4 text-amber-400" />,
+            onClick: () => {
+                const user = useUserStore.getState().user;
+                if (!user) {
+                    useUserStore.getState().openLoginModal();
+                    return;
+                }
+                const projectParam = projectId ? `&projectId=${encodeURIComponent(projectId)}` : "";
+                window.open(`/editor?nodeId=${encodeURIComponent(node.id)}&title=${encodeURIComponent(node.title || "画布分镜")}${projectParam}`, "_blank");
+            },
+        }] : []),
         ...(canRetry ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
         ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...((hasVideo || hasAudio) && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadMediaToCloud", title: "上传至云存储", label: "上传至云存储", icon: <Upload className="size-4" />, onClick: () => onUploadMediaToCloud(node) }] : []),

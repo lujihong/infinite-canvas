@@ -100,12 +100,12 @@ export function ChannelModelSelectorModal({ models, sourceModels = [], onCancel,
         >
             <Flex vertical gap={14}>
                 <Flex gap={12} wrap>
-                    <Input.Search placeholder="搜索模型" allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ flex: "1 1 260px" }} />
-                    <Space.Compact style={{ flex: "1 1 320px" }}>
-                        <Input value={newModel} placeholder="输入模型名称" onChange={(event) => setNewModel(event.target.value)} onPressEnter={addModel} />
-                        <Button onClick={addModel}>增加模型</Button>
+                    <Input.Search placeholder="搜索已拉取或已有模型" allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ flex: "1 1 240px" }} />
+                    <Space.Compact style={{ flex: "1 1 360px" }}>
+                        <Input value={newModel} placeholder="手动输入模型名（如 dall-e-3、deepseek-chat）" onChange={(event) => setNewModel(event.target.value)} onPressEnter={addModel} />
+                        <Button type="primary" onClick={addModel}>添加模型</Button>
                         <Button icon={<ReloadOutlined />} loading={fetching} onClick={() => void fetchModels()}>
-                            拉取模型列表
+                            拉取模型
                         </Button>
                     </Space.Compact>
                 </Flex>

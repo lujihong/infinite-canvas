@@ -28,6 +28,7 @@ export const CANVAS_AGENT_ACTION_NAMES = [
     "generate_video",
     "generate_audio",
     "get_media_task_status",
+    "create_video_montage",
 ] as const;
 
 export type CanvasAgentActionName = (typeof CANVAS_AGENT_ACTION_NAMES)[number];
@@ -162,6 +163,7 @@ export const CANVAS_AGENT_TOOLS: CanvasAgentToolDefinition[] = [
             prompt: STRING,
             title: STRING,
             sourceNodeIds: STRING_ARRAY,
+            model: STRING,
             size: STRING,
             seconds: { type: "number", minimum: -1, maximum: 30 },
             generateAudio: { type: "boolean" },
@@ -175,6 +177,15 @@ export const CANVAS_AGENT_TOOLS: CanvasAgentToolDefinition[] = [
         ["prompt", "sourceNodeIds"],
     ),
     defineTool("get_media_task_status", "读取图片、视频或音频节点的生成状态。", { nodeId: STRING }, ["nodeId"]),
+    defineTool(
+        "create_video_montage",
+        "将画布中已有的多个视频分镜按时间顺序编排进多轨视频剪辑时间轴，并在新标签页中打开剪辑工作台完成成片合成、调速调音与配乐。videoNodeIds 为要排轨剪辑的视频节点 ID 列表（若未传则默认使用当前画布选中的有效视频节点）。",
+        {
+            videoNodeIds: STRING_ARRAY,
+            title: STRING,
+            aspectRatio: { type: "string", enum: ["16:9", "9:16", "1:1", "4:3"] },
+        },
+    ),
 ];
 
 export function normalizeCanvasAgentAction(name: unknown, args: unknown, id = nanoid()): CanvasAgentAction {
@@ -288,6 +299,7 @@ export function normalizeCanvasAgentAction(name: unknown, args: unknown, id = na
                 prompt: requiredString(input.prompt, "prompt"),
                 ...(sourceNodeIds ? { sourceNodeIds } : {}),
                 ...(optionalString(input.title) ? { title: optionalString(input.title) } : {}),
+                ...(optionalString(input.model) ? { model: optionalString(input.model) } : {}),
                 ...(optionalString(input.size) ? { size: optionalString(input.size) } : {}),
                 ...(boundedNumber(input.seconds, -1, 30) !== undefined ? { seconds: boundedNumber(input.seconds, -1, 30) } : {}),
                 ...(typeof input.generateAudio === "boolean" ? { generateAudio: input.generateAudio } : {}),
@@ -302,6 +314,15 @@ export function normalizeCanvasAgentAction(name: unknown, args: unknown, id = na
                 ...(optionalString(input.title) ? { title: optionalString(input.title) } : {}),
                 ...(optionalString(input.voice) ? { voice: optionalString(input.voice) } : {}),
                 ...(optionalString(input.instructions) ? { instructions: optionalString(input.instructions) } : {}),
+            };
+            break;
+        }
+        case "create_video_montage": {
+            const videoNodeIds = optionalStringArray(input.videoNodeIds, "videoNodeIds");
+            normalized = {
+                ...(videoNodeIds ? { videoNodeIds } : {}),
+                ...(optionalString(input.title) ? { title: optionalString(input.title) } : {}),
+                ...(optionalString(input.aspectRatio) ? { aspectRatio: optionalString(input.aspectRatio) } : {}),
             };
             break;
         }
@@ -350,6 +371,7 @@ export function canvasAgentActionLabel(action: CanvasAgentAction) {
         generate_video: "正在创建视频节点",
         generate_audio: "正在创建音频节点",
         get_media_task_status: "正在读取媒体任务",
+        create_video_montage: "正在编排视频剪辑工程",
     };
     return labels[action.name];
 }

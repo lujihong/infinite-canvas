@@ -1060,14 +1060,26 @@ func providerSecureHash(parts []string) string {
 
 func modelChannelsForModel(channels []model.ModelChannel, modelName string) []model.ModelChannel {
 	result := []model.ModelChannel{}
+	trimmedModel := strings.TrimSpace(modelName)
 	for _, channel := range channels {
 		if !channel.Enabled || channel.BaseURL == "" || channel.APIKey == "" {
 			continue
 		}
+		if trimmedModel == "" {
+			result = append(result, channel)
+			continue
+		}
 		for _, item := range channel.Models {
-			if strings.TrimSpace(item) == modelName {
+			if strings.EqualFold(strings.TrimSpace(item), trimmedModel) {
 				result = append(result, channel)
 				break
+			}
+		}
+	}
+	if len(result) == 0 {
+		for _, channel := range channels {
+			if channel.Enabled && channel.BaseURL != "" && channel.APIKey != "" {
+				result = append(result, channel)
 			}
 		}
 	}

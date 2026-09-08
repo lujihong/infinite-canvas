@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -246,6 +247,73 @@ func UploadStorageObjectWithProvider(ctx context.Context, filename string, conte
 	return UploadedStorageObject{ID: objectID, URL: url, StorageKey: "server:" + objectID, Bytes: int64(len(data)), MimeType: contentType}, nil
 }
 
+// PersistRemoteMediaToStorage 将远程或 Base64 媒体自动下载并存入本地对象存储（WebDAV/S3），实现数据落地持久化
+func PersistRemoteMediaToStorage(ctx context.Context, mediaURL string, filename string, defaultContentType string) (UploadedStorageObject, error) {
+	trimmed := strings.TrimSpace(mediaURL)
+	if trimmed == "" {
+		return UploadedStorageObject{}, errors.New("媒体 URL 为空")
+	}
+
+	if strings.HasPrefix(trimmed, "/api/files/") {
+		return UploadedStorageObject{URL: trimmed, StorageKey: ""}, nil
+	}
+
+	var data []byte
+	contentType := strings.TrimSpace(defaultContentType)
+
+	if strings.HasPrefix(trimmed, "data:") {
+		commaIdx := strings.Index(trimmed, ",")
+		if commaIdx == -1 {
+			return UploadedStorageObject{}, errors.New("无效的 Data URL")
+		}
+		meta := trimmed[5:commaIdx]
+		parts := strings.Split(meta, ";")
+		if len(parts) > 0 && parts[0] != "" {
+			contentType = parts[0]
+		}
+		decoded, err := base64.StdEncoding.DecodeString(trimmed[commaIdx+1:])
+		if err != nil {
+			return UploadedStorageObject{}, fmt.Errorf("Base64 解码失败: %w", err)
+		}
+		data = decoded
+	} else if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, trimmed, nil)
+		if err != nil {
+			return UploadedStorageObject{}, err
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+		client := SafeProxyHTTPClient()
+		resp, err := client.Do(req)
+		if err != nil {
+			return UploadedStorageObject{}, fmt.Errorf("拉取远程媒体失败: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return UploadedStorageObject{}, fmt.Errorf("拉取远程媒体返回状态码: %d", resp.StatusCode)
+		}
+		if remoteType := resp.Header.Get("Content-Type"); remoteType != "" {
+			contentType = strings.Split(remoteType, ";")[0]
+		}
+		limitReader := io.LimitReader(resp.Body, 200*1024*1024)
+		readData, err := io.ReadAll(limitReader)
+		if err != nil {
+			return UploadedStorageObject{}, fmt.Errorf("读取远程媒体失败: %w", err)
+		}
+		data = readData
+	} else {
+		return UploadedStorageObject{}, errors.New("不支持的媒体 URL 协议")
+	}
+
+	if len(data) == 0 {
+		return UploadedStorageObject{}, errors.New("媒体数据为空")
+	}
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+
+	return UploadStorageObject(ctx, filename, contentType, data)
+}
+
 // RegisterDirectStorageObject 登记浏览器已直传至用户 WebDAV 的对象。
 func RegisterDirectStorageObject(ctx context.Context, input DirectStorageObjectInput) (UploadedStorageObject, error) {
 	user, ok := UserFromContext(ctx)
@@ -302,8 +370,15 @@ func DeleteStorageObject(ctx context.Context, id string, providerInput *StorageO
 		}
 		return err
 	}
-	if user, ok := UserFromContext(ctx); ok && object.CreatedBy != "" && object.CreatedBy != user.ID {
-		return errors.New("无权删除该对象")
+	user, ok := UserFromContext(ctx)
+	if ok && user.ID != "" {
+		if object.CreatedBy != "" && object.CreatedBy != user.ID && user.Role != model.UserRoleAdmin {
+			return errors.New("无权删除该对象")
+		}
+	} else {
+		if object.CreatedBy != "anonymous" {
+			return errors.New("无权删除该对象")
+		}
 	}
 	settings, err := repository.GetSettings()
 	if err != nil {

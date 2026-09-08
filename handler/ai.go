@@ -20,10 +20,32 @@ import (
 const userModelChannelHeader = "X-User-Model-Channel-ID"
 
 func selectAIRequestChannel(user model.AuthUser, modelName string, channelID string, userChannelID string) (model.ModelChannel, string, error) {
+	// 1. 优先提取当前用户专属绑定的 New-API 令牌 (全自动打通模型中转站，用户无需且无法配置)
+	if userToken := service.GetUserExclusiveNewAPIToken(user.ID); userToken != "" {
+		return model.ModelChannel{
+			ID:       "xyb-official-exclusive",
+			Protocol: "openai",
+			Name:     "鑫元宝官方模型服务",
+			BaseURL:  "https://api.xybcloud.com/",
+			APIKey:   userToken,
+			Models:   []string{"*"},
+			Weight:   1,
+			Timeout:  600,
+			Enabled:  true,
+		}, "xyb-official-exclusive", nil
+	}
+
 	userChannelID = strings.TrimSpace(userChannelID)
 	if userChannelID != "" {
 		channel, err := service.SelectUserLocalModelChannelForModel(user.ID, modelName, userChannelID)
 		return channel, userChannelID, err
+	}
+	// 检查用户自身是否配置了本地渠道 (仅限管理员)
+	if user.Role == model.UserRoleAdmin {
+		localChannel, err := service.SelectUserLocalModelChannelForModel(user.ID, modelName, "")
+		if err == nil && strings.TrimSpace(localChannel.BaseURL) != "" && strings.TrimSpace(localChannel.APIKey) != "" {
+			return localChannel, localChannel.ID, nil
+		}
 	}
 	if !service.UserCanUseRemoteModelChannel(user) {
 		return model.ModelChannel{}, "", fmt.Errorf("当前账号未开放云端渠道")
@@ -100,10 +122,7 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "未登录或权限不足")
 		return
 	}
-	modelName := r.URL.Query().Get("model")
-	if strings.TrimSpace(modelName) == "" {
-		modelName = "Agnes-Video-V2.0"
-	}
+	modelName := strings.TrimSpace(r.URL.Query().Get("model"))
 	channel, _, err := selectAIRequestChannel(user, modelName, r.Header.Get("X-Model-Channel-ID"), r.Header.Get(userModelChannelHeader))
 	if err != nil {
 		log.Printf("AI proxy select channel failed: model=%s err=%v", modelName, err)
@@ -115,6 +134,12 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 	if err != nil {
 		Fail(w, "AI 接口请求失败")
 		return
+	}
+	if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
+		request.Header.Set("Range", rangeHeader)
+	}
+	if acceptHeader := r.Header.Get("Accept"); acceptHeader != "" {
+		request.Header.Set("Accept", acceptHeader)
 	}
 	service.SetModelChannelAuthHeader(request, channel)
 	copyAIResponse(w, request, channel, aiLogContext{StartedAt: startedAt, Endpoint: path, Method: http.MethodGet, Model: modelName, Channel: channel, UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), RequestBody: summarizeQueryParams(r.URL.Query())}, nil)

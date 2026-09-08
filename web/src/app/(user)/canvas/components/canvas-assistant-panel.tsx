@@ -30,6 +30,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useWalletStore } from "@/stores/use-wallet-store";
 import { createCanvasAgentState, runCanvasAgent } from "../agent/canvas-agent-runtime";
 import type { CanvasAgentContext } from "../agent/canvas-agent-context";
 import type { CanvasAgentAction, CanvasAgentToolResult } from "../agent/canvas-agent-tools";
@@ -392,6 +393,7 @@ export function CanvasAssistantPanel({
         } finally {
             if (abortRef.current === controller) abortRef.current = null;
             setIsRunning(false);
+            void useWalletStore.getState().fetchWallet();
         }
     };
 
@@ -405,6 +407,11 @@ export function CanvasAssistantPanel({
     const submit = async (nextPrompt = prompt, referenceIds = composerReferenceIds) => {
         const text = nextPrompt.trim();
         if (!text || isRunning) return;
+        if (!useWalletStore.getState().checkBalanceOrIntercept(() => {
+            appMessage.warning("当前账户算力余额不足，请先充值算力后再使用智能助理");
+        })) {
+            return;
+        }
         await sendMessage(text, resolveReferences(referenceIds));
     };
 

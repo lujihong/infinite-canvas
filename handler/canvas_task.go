@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -292,6 +293,29 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	task.Height = 0
 	task.Error = ""
 	task.ErrorDetail = ""
+
+	// 自动转存至本地物理存储（WebDAV/S3），杜绝外部临时链接过期失效
+	bgCtx := service.WithUser(context.Background(), user)
+	if persisted, persistErr := service.PersistRemoteMediaToStorage(bgCtx, imageURLs[0], "canvas_image_"+task.ID+".png", mimeType); persistErr == nil && persisted.URL != "" {
+		task.ImageURL = persisted.URL
+		task.StorageKey = persisted.StorageKey
+		if persisted.Bytes > 0 {
+			task.Bytes = persisted.Bytes
+		}
+	}
+	if collectAll && len(imageURLs) > 1 {
+		persistedURLs := make([]string, len(imageURLs))
+		persistedURLs[0] = task.ImageURL
+		for i := 1; i < len(imageURLs); i++ {
+			if persisted, persistErr := service.PersistRemoteMediaToStorage(bgCtx, imageURLs[i], fmt.Sprintf("canvas_image_%s_%d.png", task.ID, i), mimeType); persistErr == nil && persisted.URL != "" {
+				persistedURLs[i] = persisted.URL
+			} else {
+				persistedURLs[i] = imageURLs[i]
+			}
+		}
+		task.ImageURLs = persistedURLs
+	}
+
 	_, _ = service.SaveCanvasImageTask(task)
 }
 

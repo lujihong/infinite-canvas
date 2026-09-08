@@ -411,10 +411,26 @@ export function defaultUserWebDAVStorageProvider(): UserWebDAVStorageProvider {
     };
 }
 
+function getScopedUserStorageKey(baseKey: string) {
+    const user = useUserStore.getState().user;
+    return `${baseKey}:${user?.id || "guest"}`;
+}
+
+export function clearGuestStorageProviders() {
+    if (typeof window === "undefined") return;
+    try {
+        window.localStorage.removeItem(`${USER_STORAGE_PROVIDER_KEY}:guest`);
+        window.localStorage.removeItem(`${USER_WEBDAV_STORAGE_PROVIDER_KEY}:guest`);
+        window.localStorage.removeItem(USER_STORAGE_PROVIDER_KEY);
+        window.localStorage.removeItem(USER_WEBDAV_STORAGE_PROVIDER_KEY);
+    } catch {}
+}
+
 export function loadUserS3StorageProvider() {
     if (typeof window === "undefined") return null;
     try {
-        const parsed = JSON.parse(window.localStorage.getItem(USER_STORAGE_PROVIDER_KEY) || "null") as UserS3StorageProvider | null;
+        const key = getScopedUserStorageKey(USER_STORAGE_PROVIDER_KEY);
+        const parsed = JSON.parse(window.localStorage.getItem(key) || "null") as UserS3StorageProvider | null;
         return parsed ? { ...defaultUserStorageProvider(), ...parsed, type: "s3" as const } : null;
     } catch {
         return null;
@@ -424,7 +440,8 @@ export function loadUserS3StorageProvider() {
 export function loadUserWebDAVStorageProvider() {
     if (typeof window === "undefined") return null;
     try {
-        const parsed = JSON.parse(window.localStorage.getItem(USER_WEBDAV_STORAGE_PROVIDER_KEY) || "null") as UserWebDAVStorageProvider | null;
+        const key = getScopedUserStorageKey(USER_WEBDAV_STORAGE_PROVIDER_KEY);
+        const parsed = JSON.parse(window.localStorage.getItem(key) || "null") as UserWebDAVStorageProvider | null;
         return parsed ? { ...defaultUserWebDAVStorageProvider(), ...parsed, type: "webdav" as const } : null;
     } catch {
         return null;
@@ -441,11 +458,13 @@ export function loadUserStorageProvider(): UserStorageProvider | null {
 }
 
 export function saveUserStorageProvider(provider: UserS3StorageProvider) {
-    window.localStorage.setItem(USER_STORAGE_PROVIDER_KEY, JSON.stringify({ ...defaultUserStorageProvider(), ...provider, type: "s3" }));
+    const key = getScopedUserStorageKey(USER_STORAGE_PROVIDER_KEY);
+    window.localStorage.setItem(key, JSON.stringify({ ...defaultUserStorageProvider(), ...provider, type: "s3" }));
 }
 
 export function saveUserWebDAVStorageProvider(provider: UserWebDAVStorageProvider) {
-    window.localStorage.setItem(USER_WEBDAV_STORAGE_PROVIDER_KEY, JSON.stringify({ ...defaultUserWebDAVStorageProvider(), ...provider, type: "webdav" }));
+    const key = getScopedUserStorageKey(USER_WEBDAV_STORAGE_PROVIDER_KEY);
+    window.localStorage.setItem(key, JSON.stringify({ ...defaultUserWebDAVStorageProvider(), ...provider, type: "webdav" }));
 }
 
 function validS3Provider(provider: UserS3StorageProvider) {

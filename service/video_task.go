@@ -1,14 +1,15 @@
 package service
 
 import (
+	"context"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/repository"
-	"github.com/google/uuid"
 )
 
 const videoTaskPollInterval = 5 * time.Second
@@ -131,27 +132,27 @@ func DeleteUserVideoTask(userID string, id string) error {
 
 func VideoTaskResponse(task model.VideoTask) map[string]any {
 	result := map[string]any{
-		"id":           task.ID,
-		"object":       "video",
-		"model":        task.Model,
-		"channelId":    task.ChannelID,
+		"id":            task.ID,
+		"object":        "video",
+		"model":         task.Model,
+		"channelId":     task.ChannelID,
 		"userChannelId": task.UserChannelID,
-		"channelName":  task.ChannelName,
-		"source":       task.Source,
-		"source_id":    task.SourceID,
-		"status":       task.Status,
-		"progress":     task.Progress,
-		"task_id":      firstVideoTaskValue(task.UpstreamTaskID, task.ID),
-		"video_id":     task.UpstreamVideoID,
-		"seconds":      task.Seconds,
-		"size":         task.Size,
-		"created_at":   task.CreatedAt,
-		"updated_at":   task.UpdatedAt,
-		"started_at":   task.StartedAt,
-		"completed_at": task.CompletedAt,
-		"createdAt":    task.CreatedAt,
-		"updatedAt":    task.UpdatedAt,
-		"request_body": task.RequestBody,
+		"channelName":   task.ChannelName,
+		"source":        task.Source,
+		"source_id":     task.SourceID,
+		"status":        task.Status,
+		"progress":      task.Progress,
+		"task_id":       firstVideoTaskValue(task.UpstreamTaskID, task.ID),
+		"video_id":      task.UpstreamVideoID,
+		"seconds":       task.Seconds,
+		"size":          task.Size,
+		"created_at":    task.CreatedAt,
+		"updated_at":    task.UpdatedAt,
+		"started_at":    task.StartedAt,
+		"completed_at":  task.CompletedAt,
+		"createdAt":     task.CreatedAt,
+		"updatedAt":     task.UpdatedAt,
+		"request_body":  task.RequestBody,
 	}
 	if task.VideoURL != "" {
 		result["url"] = task.VideoURL
@@ -221,9 +222,7 @@ func runVideoTaskPoller() {
 				break
 			}
 			if lastCleanupAt.IsZero() || current.Sub(lastCleanupAt) >= videoTaskCleanupInterval {
-				if err := repository.DeleteFinishedVideoTasksBefore(videoTaskTime(current.Add(-videoTaskFinishedRetention))); err != nil {
-					log.Printf("cleanup finished video tasks failed err=%v", err)
-				}
+				// 严禁自动物理删除用户的已完成视频任务，确保创作成果长期安全保留在系统中
 				lastCleanupAt = current
 			}
 			for _, task := range tasks {
@@ -295,9 +294,33 @@ func UpdateVideoTaskFromPoll(task model.VideoTask, update VideoTaskPollUpdate) e
 		task.CompletedAt = current
 		task.Error = ""
 		task.ErrorDetail = ""
+
+		// 自动异步转存至本地存储，杜绝外部临时链接过期失效导致视频丢失
+		if task.VideoURL != "" && !strings.HasPrefix(task.VideoURL, "/api/files/") {
+			targetURL := task.VideoURL
+			taskID := task.ID
+			userID := task.UserID
+			go func() {
+				bgCtx := context.Background()
+				if userID != "" {
+					bgCtx = WithUser(bgCtx, model.AuthUser{ID: userID})
+				}
+				if persisted, pErr := PersistRemoteMediaToStorage(bgCtx, targetURL, "canvas_video_"+taskID+".mp4", "video/mp4"); pErr == nil && persisted.URL != "" {
+					if cur, found, _ := repository.GetVideoTask(taskID); found && cur.VideoURL != persisted.URL {
+						cur.VideoURL = persisted.URL
+						cur.UpdatedAt = now()
+						_, _ = repository.SaveVideoTask(cur)
+					}
+				}
+			}()
+		}
 	} else if task.Error != "" || IsFailedVideoTaskStatus(task.Status) {
 		task.Status = "failed"
 		task.CompletedAt = current
+		if task.Credits > 0 && strings.TrimSpace(task.UserID) != "" {
+			_ = RefundUserCredits(task.UserID, task.Model, task.Credits, "/videos")
+			task.Credits = 0
+		}
 	}
 	_, err := repository.SaveVideoTask(task)
 	return err

@@ -6,7 +6,7 @@ import { getImageBlob } from "@/services/image-storage";
 import type { CanvasExportAsset, CanvasExportFile } from "../export-types";
 import { normalizeCanvasProject, type CanvasProject } from "../stores/use-canvas-store";
 
-export async function exportCanvasProjects(projects: CanvasProject[], fileName = "新元宝画布") {
+export async function exportCanvasProjects(projects: CanvasProject[], fileName = "新项目") {
     const zipFiles: { name: string; data: BlobPart }[] = [];
     const exportedProjects = await Promise.all(
         projects.map(async (rawProject) => {

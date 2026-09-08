@@ -7,8 +7,8 @@ import "./globals.css";
 import React from "react";
 
 export const metadata: Metadata = {
-    title: "新元宝视频工作台",
-    description: "新元宝视频工作台 - 专为高质量 AI 图像与视频创作打造的智能画布",
+    title: "鑫元宝视频创作工作台",
+    description: "鑫元宝视频创作工作台 - 专为高质量 AI 图像与视频创作打造的智能工作台",
 };
 
 export default function RootLayout({

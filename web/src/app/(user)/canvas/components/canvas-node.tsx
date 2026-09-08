@@ -7,6 +7,7 @@ import { ChevronRight, Image as ImageIcon, Maximize2, Music2, Pause, Play, Refre
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
+import { formatPlayableVideoUrl } from "@/services/api/video";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "../types";
@@ -440,20 +441,22 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </>
             ) : null}
 
-            {!referenceSelectionState && showPanel && !isGroup && renderPanel ? <div className={"absolute left-1/2 top-full z-[70] max-w-[calc(100vw-24px)] -translate-x-1/2 pt-4 " + (isCanvasImageNodeType(data.type) || data.type === CanvasNodeType.Video || data.type === CanvasNodeType.Audio ? "w-[622px]" : "w-[500px]")}>{renderPanel(data)}</div> : null}
+            {!referenceSelectionState && showPanel && !isGroup && renderPanel ? <div className={"absolute left-1/2 top-full z-[70] max-w-[calc(100vw-24px)] -translate-x-1/2 pt-4 " + (isCanvasImageNodeType(data.type) || data.type === CanvasNodeType.Video || data.type === CanvasNodeType.Audio ? "w-[680px]" : "w-[520px]")}>{renderPanel(data)}</div> : null}
         </div>
     );
 });
 
-function NodeContent(props: NodeContentRendererProps) {
+function NodeContent(props: NodeContentRendererProps): React.ReactElement | null {
     if (props.node.type === CanvasNodeType.Group) return null;
-    if ((props.node.type === CanvasNodeType.Config || props.node.type === CanvasNodeType.Director) && props.renderNodeContent) return props.renderNodeContent(props.node);
+    if ((props.node.type === CanvasNodeType.Config || props.node.type === CanvasNodeType.Director) && props.renderNodeContent) {
+        return (props.renderNodeContent(props.node) as React.ReactElement) || null;
+    }
     if (props.isBatchRoot) return props.node.type === CanvasNodeType.Panorama ? <PanoramaNodeContent {...props} /> : <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading" && (props.node.type !== CanvasNodeType.Text || !props.node.metadata.content)) return <LoadingContent node={props.node} theme={props.theme} now={props.now} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type];
-    return Renderer ? <Renderer {...props} /> : <UnknownNodeContent theme={props.theme} />;
+    return (Renderer ? <Renderer {...props} /> : <UnknownNodeContent theme={props.theme} />) as React.ReactElement | null;
 }
 
 const nodeContentRenderers = {
@@ -683,9 +686,10 @@ function VideoNodeContent({ node, theme, isSelected, onViewImage }: NodeContentR
         event.stopPropagation();
         if (isSelected) videoRef.current?.focus({ preventScroll: true });
     };
+    const playableSrc = formatPlayableVideoUrl(node.metadata.content, node.metadata.model);
     return (
         <div className="relative h-full w-full overflow-hidden rounded-[18px] bg-black" data-canvas-no-zoom>
-            <video ref={videoRef} src={node.metadata.content} tabIndex={-1} playsInline className="h-full w-full object-contain outline-none" onLoadedMetadata={(event) => setMediaDurationMs(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration * 1000 : 0)} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onKeyDown={(event) => { if (isSelected && event.code === "Space") { event.preventDefault(); event.stopPropagation(); togglePlayback(); } }} />
+            <video ref={videoRef} src={playableSrc} tabIndex={-1} playsInline className="h-full w-full object-contain outline-none" onLoadedMetadata={(event) => setMediaDurationMs(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration * 1000 : 0)} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onKeyDown={(event) => { if (isSelected && event.code === "Space") { event.preventDefault(); event.stopPropagation(); togglePlayback(); } }} />
             {mediaDurationMs > 0 ? <span className="pointer-events-none absolute left-2 top-2 z-20 flex h-7 items-center justify-center rounded-md px-2 text-[11px] font-medium opacity-70 backdrop-blur" style={controlStyle}>{new Date(mediaDurationMs).toISOString().slice(mediaDurationMs >= 3_600_000 ? 11 : 14, 19)}</span> : null}
             <button type="button" title={isPlaying ? "暂停" : "播放"} aria-label={isPlaying ? "暂停" : "播放"} className={`${controlClassName} left-2`} style={controlStyle} onClick={(event) => { event.stopPropagation(); togglePlayback(); }} onMouseDown={keepVideoFocus} onDoubleClick={(event) => event.stopPropagation()}>
                 {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}

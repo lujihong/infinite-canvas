@@ -127,8 +127,30 @@ const WORKBENCH_LAYOUT_KEY = "infinite-canvas:image-workbench-layout";
 const RESULT_VIEW_MODE_KEY = "infinite-canvas:image-result-view-mode";
 const IMAGE_TASK_POLL_INTERVAL_MS = 10000;
 const WORKFLOW_BUTTON_POSITION_KEY = "infinite-canvas:workflow-button-position";
-const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
-const categoryStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_categories" });
+const imageLogStorePool = new Map<string, LocalForage>();
+const imageCategoryStorePool = new Map<string, LocalForage>();
+
+function getImageLogStore(userId?: string): LocalForage {
+    const currentUserId = userId || useUserStore.getState().user?.id || "guest";
+    const storeName = `image_generation_logs_${currentUserId}`;
+    let store = imageLogStorePool.get(storeName);
+    if (!store) {
+        store = localforage.createInstance({ name: "infinite-canvas", storeName });
+        imageLogStorePool.set(storeName, store);
+    }
+    return store;
+}
+
+function getImageCategoryStore(userId?: string): LocalForage {
+    const currentUserId = userId || useUserStore.getState().user?.id || "guest";
+    const storeName = `image_generation_categories_${currentUserId}`;
+    let store = imageCategoryStorePool.get(storeName);
+    if (!store) {
+        store = localforage.createInstance({ name: "infinite-canvas", storeName });
+        imageCategoryStorePool.set(storeName, store);
+    }
+    return store;
+}
 export default function ImagePage() {
     const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -187,7 +209,6 @@ export default function ImagePage() {
     };
 
     useEffect(() => {
-        void refreshCategories();
         try {
             const storedLayout = window.localStorage?.getItem(WORKBENCH_LAYOUT_KEY);
             if (storedLayout === "side" || storedLayout === "bottom") setWorkbenchLayoutState(storedLayout);
@@ -213,7 +234,6 @@ export default function ImagePage() {
         logsRef.current = logs;
     }, [logs]);
 
-
     useEffect(() => {
         if (token) accountHistorySyncEnabledRef.current = true;
     }, [token]);
@@ -228,11 +248,15 @@ export default function ImagePage() {
 
     useEffect(() => {
         if (!isUserReady) return;
-        if (token) {
-            void loadAccountImageHistory(token).then((items) => syncBackendImageTasks(items || logsRef.current));
+        if (!token) {
+            setLogs([]);
+            setCategories([]);
+            setResults([]);
+            setSelectedLogIds([]);
             return;
         }
-        void refreshLogs().then((items) => syncBackendImageTasks(items));
+        void refreshCategories();
+        void loadAccountImageHistory(token).then((items) => syncBackendImageTasks(items || logsRef.current));
     }, [isUserReady, token]);
 
     useEffect(() => {
@@ -626,7 +650,7 @@ export default function ImagePage() {
         const synced = await syncImage(image, index);
         if (!synced) return;
         const nextLog = { ...log, images: log.images.map((item) => item.id === image.id ? synced : item) };
-        await logStore.setItem(log.id, serializeLog(nextLog));
+        await getImageLogStore().setItem(log.id, serializeLog(nextLog));
         const nextLogs = logs.map((item) => item.id === log.id ? nextLog : item);
         setLogs(nextLogs);
         await persistImageHistory(nextLogs, categories);
@@ -702,7 +726,7 @@ export default function ImagePage() {
         const deletedLogs = logs.filter((log) => selectedLogIds.includes(log.id));
         const nextLogs = logs.filter((log) => !selectedLogIds.includes(log.id));
         const imageKeys = disposableLogStorageKeys(deletedLogs, nextLogs);
-        void Promise.all([deleteBackendImageTasks(deletedLogs), deleteAccountImageLogs(deletedLogs), deleteStoredImages(imageKeys), ...deletedLogs.map((log) => logStore.removeItem(log.id))]).then(async () => {
+        void Promise.all([deleteBackendImageTasks(deletedLogs), deleteAccountImageLogs(deletedLogs), deleteStoredImages(imageKeys), ...deletedLogs.map((log) => getImageLogStore().removeItem(log.id))]).then(async () => {
             setLogs(nextLogs);
             setReferences((value) => value.filter((item) => !item.storageKey || !imageKeys.includes(item.storageKey)));
             await persistImageHistory(nextLogs, categories);
@@ -726,7 +750,7 @@ export default function ImagePage() {
             onOk: async () => {
                 const nextLogs = logs.filter((item) => item.id !== log.id);
                 const imageKeys = disposableLogStorageKeys([log], nextLogs);
-                await Promise.all([deleteBackendImageTasks([log]), deleteAccountImageLogs([log]), deleteStoredImages(imageKeys), logStore.removeItem(log.id)]);
+                await Promise.all([deleteBackendImageTasks([log]), deleteAccountImageLogs([log]), deleteStoredImages(imageKeys), getImageLogStore().removeItem(log.id)]);
                 setLogs(nextLogs);
                 setReferences((value) => value.filter((item) => !item.storageKey || !imageKeys.includes(item.storageKey)));
                 await persistImageHistory(nextLogs, categories);
@@ -768,8 +792,8 @@ export default function ImagePage() {
             const duplicateLogs = storedLogs.filter((item) => item.id !== log.id && imageLogIdentityKeys(item).some((key) => keys.has(key)));
             const nextLogs = dedupeGenerationLogs([persistedLog, ...storedLogs.filter((item) => item.id !== log.id)]);
             setLogs(nextLogs);
-            await Promise.all(duplicateLogs.map((item) => logStore.removeItem(item.id)));
-            await logStore.setItem(log.id, serializeLog(persistedLog));
+            await Promise.all(duplicateLogs.map((item) => getImageLogStore().removeItem(item.id)));
+            await getImageLogStore().setItem(log.id, serializeLog(persistedLog));
             await persistImageHistory(nextLogs, categories);
         })();
         saveLogChainRef.current = nextChain;
@@ -819,7 +843,7 @@ export default function ImagePage() {
             const mergedLogs = mergeBackendImageTasks(currentLogs, recoverableTasks, currentConfig);
             const taskIds = new Set(recoverableTasks.flatMap(imageTaskIdentityKeys));
             const recoveredLogs = mergedLogs.filter((log) => imageLogIdentityKeys(log).some((key) => taskIds.has(key)));
-            await Promise.all(recoveredLogs.map((log) => logStore.setItem(log.id, serializeLog(log))));
+            await Promise.all(recoveredLogs.map((log) => getImageLogStore().setItem(log.id, serializeLog(log))));
             setLogs(mergedLogs);
             setResults((value) => mergePendingLogResults(value, recoveredLogs));
             return mergedLogs;
@@ -876,7 +900,7 @@ export default function ImagePage() {
         const nextCategory = { id: nanoid(), name: trimmedName, createdAt: Date.now() };
         const nextCategories = [...categories, nextCategory];
         setCategories(nextCategories);
-        await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
+        await getImageCategoryStore().setItem(CATEGORY_STORE_KEY, nextCategories);
         await persistImageHistory(logs, nextCategories);
         return nextCategory;
     };
@@ -889,7 +913,7 @@ export default function ImagePage() {
         }
         const nextCategories = categories.map((item) => (item.id === category.id ? { ...item, name: trimmedName } : item));
         setCategories(nextCategories);
-        await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
+        await getImageCategoryStore().setItem(CATEGORY_STORE_KEY, nextCategories);
         await persistImageHistory(logs, nextCategories);
         message.success("已重命名分类");
     };
@@ -906,8 +930,8 @@ export default function ImagePage() {
                 const nextLogs = logs.map((log) => ({ ...log, categoryIds: log.categoryIds.filter((id) => id !== category.id) }));
                 setCategories(nextCategories);
                 setLogs(nextLogs);
-                await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
-                await Promise.all(nextLogs.map((log) => logStore.setItem(log.id, serializeLog(log))));
+                await getImageCategoryStore().setItem(CATEGORY_STORE_KEY, nextCategories);
+                await Promise.all(nextLogs.map((log) => getImageLogStore().setItem(log.id, serializeLog(log))));
                 await persistImageHistory(nextLogs, nextCategories);
                 message.success("已删除分类");
             },
@@ -918,7 +942,7 @@ export default function ImagePage() {
         const nextLog = { ...log, categoryIds };
         const nextLogs = logs.map((item) => (item.id === log.id ? nextLog : item));
         setLogs(nextLogs);
-        await logStore.setItem(log.id, serializeLog(nextLog));
+        await getImageLogStore().setItem(log.id, serializeLog(nextLog));
         await persistImageHistory(nextLogs, categories);
         await refreshLogs();
         message.success(categoryIds.length ? "已更新分类" : "已移至未分类");
@@ -2529,7 +2553,7 @@ async function readStoredLogs() {
     if (typeof window === "undefined") return [];
     try {
         const values: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
+        await getImageLogStore().iterate<GenerationLog, void>((value) => {
             values.push(value);
         });
         const logs = await Promise.all(values.map(normalizeLog));
@@ -2542,7 +2566,7 @@ async function readStoredLogs() {
 async function readStoredCategories() {
     if (typeof window === "undefined") return [];
     try {
-        const value = await categoryStore.getItem<GenerationCategory[]>(CATEGORY_STORE_KEY);
+        const value = await getImageCategoryStore().getItem<GenerationCategory[]>(CATEGORY_STORE_KEY);
         return Array.isArray(value) ? value.filter((item) => item.id && item.name).sort((a, b) => a.createdAt - b.createdAt) : [];
     } catch {
         return [];
@@ -2551,9 +2575,9 @@ async function readStoredCategories() {
 
 async function replaceStoredImageHistory(logs: GenerationLog[], categories: GenerationCategory[]) {
     if (typeof window === "undefined") return;
-    await logStore.clear();
-    await Promise.all(logs.map((log) => logStore.setItem(log.id, serializeLog(log))));
-    await categoryStore.setItem(CATEGORY_STORE_KEY, categories);
+    await getImageLogStore().clear();
+    await Promise.all(logs.map((log) => getImageLogStore().setItem(log.id, serializeLog(log))));
+    await getImageCategoryStore().setItem(CATEGORY_STORE_KEY, categories);
 }
 
 function withWorkflowLogCategories(logs: GenerationLog[], categories: GenerationCategory[]) {

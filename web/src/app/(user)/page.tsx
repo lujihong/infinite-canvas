@@ -17,6 +17,7 @@ import { useCanvasStore } from "./canvas/stores/use-canvas-store";
 import { canvasResourceLabel } from "./canvas/utils/canvas-resource-references";
 import { HomeBannerCarousel, type HomeBanner } from "./home-banner-carousel";
 import { AppFooter } from "@/components/layout/app-footer";
+import { useUserStore } from "@/stores/use-user-store";
 import {
     CanvasNodeType,
     type CanvasAgentConfig,
@@ -51,6 +52,8 @@ function toPendingAgentAsset(payload: InsertAssetPayload, label: string): Pendin
 export default function IndexPage() {
     const { message } = App.useApp();
     const router = useRouter();
+    const user = useUserStore((state) => state.user);
+    const openLoginModal = useUserStore((state) => state.openLoginModal);
     const effectiveConfig = useEffectiveConfig();
     const createProject = useCanvasStore((state) => state.createProject);
     const hydrated = useCanvasStore((state) => state.hydrated);
@@ -63,7 +66,7 @@ export default function IndexPage() {
     const [submitting, setSubmitting] = useState(false);
     const [agentConfig, setAgentConfig] = useState<CanvasAgentConfig>(() => ({
         textApiMode: "chat",
-        autoGenerateMedia: false,
+        autoGenerateMedia: true,
         imageQuality: effectiveConfig.quality,
         imageSize: effectiveConfig.size,
         videoQuality: effectiveConfig.vquality,
@@ -85,6 +88,11 @@ export default function IndexPage() {
     };
 
     const uploadFile = async (file: File) => {
+        if (!user) {
+            message.info("请先登录后再上传素材");
+            openLoginModal();
+            return;
+        }
         try {
             if (file.type.startsWith("image/")) {
                 const uploaded = await uploadImage(file);
@@ -108,6 +116,11 @@ export default function IndexPage() {
     };
 
     const submit = (nextPrompt = prompt, referenceIds = pendingAssets.map((asset) => asset.nodeId)) => {
+        if (!user) {
+            message.info("请先登录后再开始创作");
+            openLoginModal();
+            return;
+        }
         const text = nextPrompt.trim();
         if (!text || submitting) return;
         if (!hydrated) {
@@ -116,8 +129,8 @@ export default function IndexPage() {
         }
         setSubmitting(true);
         const titles = new Set(useCanvasStore.getState().projects.map(({ title }) => title));
-        let title = "新元宝项目";
-        for (let i = 1; titles.has(title); i++) title = `新元宝项目 ${i}`;
+        let title = "新项目";
+        for (let i = 1; titles.has(title); i++) title = `新项目 ${i}`;
         const projectId = createProject(title, {
             agentConfig,
             pendingAgentRequest: { prompt: text, assets: pendingAssets.filter((asset) => referenceIds.includes(asset.nodeId)) },
@@ -140,8 +153,22 @@ export default function IndexPage() {
                             onPromptChange={setPrompt}
                             onReferenceIdsChange={(ids) => setPendingAssets((current) => current.filter((asset) => ids.includes(asset.nodeId)))}
                             onSubmit={submit}
-                            onOpenUpload={() => uploadInputRef.current?.click()}
-                            onOpenAssets={() => setAssetPickerOpen(true)}
+                            onOpenUpload={() => {
+                                if (!user) {
+                                    message.info("请先登录后再上传素材");
+                                    openLoginModal();
+                                    return;
+                                }
+                                uploadInputRef.current?.click();
+                            }}
+                            onOpenAssets={() => {
+                                if (!user) {
+                                    message.info("请先登录后再访问素材库");
+                                    openLoginModal();
+                                    return;
+                                }
+                                setAssetPickerOpen(true);
+                            }}
                             onPasteImage={(file) => void uploadFile(file)}
                         />
                     </div>

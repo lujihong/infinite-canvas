@@ -1,4 +1,4 @@
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -47,7 +47,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
         });
     } catch (error) {
         console.error("Failed to proxy", target, error);
-        return Response.json({ code: 1, data: null, msg: "接口连接失败，请确认后端服务已启动" }, { status: 502 });
+        return NextResponse.json({ code: 1, data: null, msg: "接口连接失败，请确认后端服务已启动" }, { status: 502 });
     }
 }
 

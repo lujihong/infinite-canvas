@@ -9,6 +9,7 @@ import { geminiPcmBase64ToWav, normalizeGeminiTtsVoice } from "@/lib/gemini-tts"
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { useWalletStore } from "@/stores/use-wallet-store";
 import type { ReferenceAudio } from "@/types/media";
 
 export type CanvasAudioTask = {
@@ -69,7 +70,10 @@ function aiHeaders(config: AiConfig) {
 }
 
 function refreshRemoteUser(config: AiConfig) {
-    if (usesAccountProxy(config)) void useUserStore.getState().hydrateUser();
+    if (usesAccountProxy(config)) {
+        void useUserStore.getState().hydrateUser();
+        void useWalletStore.getState().triggerWalletSync();
+    }
 }
 
 export function fetchGrokTtsVoices(config: AiConfig, model: string) {

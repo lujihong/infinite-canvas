@@ -8,6 +8,7 @@ import { dataUrlToGeminiInlineData, geminiActionUrl, geminiDirectHeaders, gemini
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directAIProviderForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { useWalletStore } from "@/stores/use-wallet-store";
 import type { ReferenceImage } from "@/types/image";
 import { nanoid } from "nanoid";
 
@@ -551,7 +552,10 @@ export function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 export function refreshRemoteUser(config: AiConfig) {
-    if (usesAccountProxy(config)) void useUserStore.getState().hydrateUser();
+    if (usesAccountProxy(config)) {
+        void useUserStore.getState().hydrateUser();
+        void useWalletStore.getState().triggerWalletSync();
+    }
 }
 
 async function writeLocalAICallLog(config: AiConfig, endpoint: string, startedAt: number, status: number, timeoutSeconds: number, requestBody: string, responseBody: string, error: string) {

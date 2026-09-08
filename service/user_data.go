@@ -58,12 +58,6 @@ func SelectUserLocalModelChannelForModel(userID string, modelName string, channe
 	if userID == "" {
 		return model.ModelChannel{}, errors.New("请先登录")
 	}
-	if modelName == "" {
-		return model.ModelChannel{}, errors.New("缺少模型名称")
-	}
-	if channelID == "" {
-		return model.ModelChannel{}, errors.New("缺少模型渠道")
-	}
 	config, ok, err := repository.GetUserConfig(userID)
 	if err != nil {
 		return model.ModelChannel{}, err
@@ -75,36 +69,55 @@ func SelectUserLocalModelChannelForModel(userID string, modelName string, channe
 	if err := json.Unmarshal([]byte(config.ModelConfig), &modelConfig); err != nil {
 		return model.ModelChannel{}, err
 	}
-	for _, channel := range modelConfig.LocalChannels {
-		if strings.TrimSpace(channel.ID) != channelID {
-			continue
-		}
-		baseURL := strings.TrimSpace(channel.BaseURL)
-		apiKey := strings.TrimSpace(channel.APIKey)
-		if baseURL == "" || apiKey == "" {
-			return model.ModelChannel{}, errors.New("本地渠道配置不完整")
-		}
-		models := userLocalChannelModels(channel.Models)
-		if len(models) > 0 && !userLocalChannelHasModel(models, modelName) {
-			return model.ModelChannel{}, errors.New("本地渠道不支持该模型")
-		}
-		protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
-		if protocol == "" {
-			protocol = "openai"
-		}
-		return model.ModelChannel{
-			ID:       channelID,
-			Protocol: protocol,
-			Name:     firstVideoTaskValue(strings.TrimSpace(channel.Name), "本地直连"),
-			BaseURL:  baseURL,
-			APIKey:   apiKey,
-			Models:   models,
-			Weight:   1,
-			Timeout:  600,
-			Enabled:  true,
-		}, nil
+	if len(modelConfig.LocalChannels) == 0 {
+		return model.ModelChannel{}, errors.New("本地渠道不存在")
 	}
-	return model.ModelChannel{}, errors.New("本地渠道不存在")
+	// 查找匹配的渠道
+	var targetChannel *userLocalModelChannelInput
+	if channelID != "" {
+		for i := range modelConfig.LocalChannels {
+			if strings.TrimSpace(modelConfig.LocalChannels[i].ID) == channelID {
+				targetChannel = &modelConfig.LocalChannels[i]
+				break
+			}
+		}
+	}
+	// 如果未指定 channelID 或没找到，尝试通过 modelName 匹配
+	if targetChannel == nil && modelName != "" {
+		for i := range modelConfig.LocalChannels {
+			models := userLocalChannelModels(modelConfig.LocalChannels[i].Models)
+			if userLocalChannelHasModel(models, modelName) {
+				targetChannel = &modelConfig.LocalChannels[i]
+				break
+			}
+		}
+	}
+	// 依然没有匹配，默认使用第一个有效本地渠道
+	if targetChannel == nil {
+		targetChannel = &modelConfig.LocalChannels[0]
+	}
+
+	baseURL := strings.TrimSpace(targetChannel.BaseURL)
+	apiKey := strings.TrimSpace(targetChannel.APIKey)
+	if baseURL == "" || apiKey == "" {
+		return model.ModelChannel{}, errors.New("本地渠道配置不完整")
+	}
+	models := userLocalChannelModels(targetChannel.Models)
+	protocol := strings.ToLower(strings.TrimSpace(targetChannel.Protocol))
+	if protocol == "" {
+		protocol = "openai"
+	}
+	return model.ModelChannel{
+		ID:       firstVideoTaskValue(targetChannel.ID, "local-1"),
+		Protocol: protocol,
+		Name:     firstVideoTaskValue(strings.TrimSpace(targetChannel.Name), "本地直连"),
+		BaseURL:  baseURL,
+		APIKey:   apiKey,
+		Models:   models,
+		Weight:   1,
+		Timeout:  600,
+		Enabled:  true,
+	}, nil
 }
 
 func userLocalChannelModels(models []string) []string {
@@ -150,6 +163,32 @@ func CurrentUserConfig(ctx context.Context) (UserConfigPayload, error) {
 		return result, nil
 	}
 	if strings.TrimSpace(config.ModelConfig) != "" {
+		var parsed map[string]any
+		if json.Unmarshal([]byte(config.ModelConfig), &parsed) == nil {
+			publicSetting, _ := PublicSettings()
+			availableModels := publicSetting.ModelChannel.AvailableModels
+			if len(availableModels) > 0 {
+				if rawChannels, ok := parsed["localChannels"].([]any); ok {
+					hasChange := false
+					for i, chRaw := range rawChannels {
+						if chMap, ok := chRaw.(map[string]any); ok {
+							id, _ := chMap["id"].(string)
+							if id == "xyb-official-exclusive" {
+								chMap["models"] = availableModels
+								rawChannels[i] = chMap
+								hasChange = true
+							}
+						}
+					}
+					if hasChange {
+						parsed["localChannels"] = rawChannels
+						if newBytes, err := json.Marshal(parsed); err == nil {
+							config.ModelConfig = string(newBytes)
+						}
+					}
+				}
+			}
+		}
 		result.ModelConfig = json.RawMessage(config.ModelConfig)
 	}
 	if strings.TrimSpace(config.StorageProvider) != "" {

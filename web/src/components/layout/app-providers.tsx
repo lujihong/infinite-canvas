@@ -8,10 +8,11 @@ import { App, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 
 import { ClientRootInit } from "@/components/layout/client-root-init";
+import { AuthModal } from "@/components/layout/auth-modal";
 import { getAntThemeConfig } from "@/lib/app-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 
-const queryClient = new QueryClient({
+export const appQueryClient = new QueryClient({
     defaultOptions: {
         queries: {
             staleTime: 30_000,
@@ -34,8 +35,11 @@ export function AppProviders({ children }: { children: ReactNode }) {
         <ConfigProvider locale={zhCN} theme={getAntThemeConfig(dark)}>
             <ProConfigProvider dark={dark}>
                 <App>
-                    <QueryClientProvider client={queryClient}>
-                        <ClientRootInit>{children}</ClientRootInit>
+                    <QueryClientProvider client={appQueryClient}>
+                        <ClientRootInit>
+                            {children}
+                            <AuthModal />
+                        </ClientRootInit>
                     </QueryClientProvider>
                 </App>
             </ProConfigProvider>

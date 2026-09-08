@@ -2,6 +2,11 @@ FROM ghcr.io/tigerowo/infinite-canvas:latest
 
 WORKDIR /app
 
+# 覆盖 Go 后端二进制（包含 v0.6.0 新增的 Skill 与 Agent 接口）
+COPY custom_build/server /app/server
+RUN chmod +x /app/server
+
+# 清理并重新建立 web 目录
 RUN rm -rf /app/web && mkdir -p /app/web
 
 # 覆盖 Next.js 编译产物与静态资源

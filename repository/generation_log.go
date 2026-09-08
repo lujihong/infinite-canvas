@@ -254,4 +254,3 @@ func generationLogIdentityValues(values ...string) []string {
 	}
 	return result
 }
-

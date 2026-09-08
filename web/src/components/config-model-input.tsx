@@ -1,0 +1,293 @@
+"use client";
+
+import { useMemo, useState, useEffect } from "react";
+import { AutoComplete, Input, Typography } from "antd";
+import { Check, ChevronDown, Cpu, Sparkles, Zap } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { getModelPricing } from "@/constant/credits";
+import {
+    filterModelsByCapability,
+    normalizeLocalChannels,
+    normalizeModelList,
+    useConfigStore,
+    type AiConfig,
+    type ModelCapability,
+} from "@/stores/use-config-store";
+
+type ConfigModelInputProps = {
+    config: AiConfig;
+    value?: string;
+    channelId?: string;
+    capability?: ModelCapability;
+    onChange: (model: string, channelId?: string) => void;
+    placeholder?: string;
+};
+
+export function ConfigModelInput({
+    config,
+    value,
+    channelId,
+    capability,
+    onChange,
+    placeholder = "直接输入模型名称或下拉选择",
+}: ConfigModelInputProps) {
+    const [inputValue, setInputValue] = useState(value || "");
+
+    useEffect(() => {
+        setInputValue(value || "");
+    }, [value]);
+
+    const publicSettings = useConfigStore((state) => state.publicSettings);
+    const availablePlatformModels = useMemo(() => {
+        return publicSettings?.modelChannel?.availableModels || [];
+    }, [publicSettings]);
+
+    const channels = useMemo(() => {
+        const rawChannels = config.channelMode === "remote"
+            ? config.publicChannels.map((channel) => ({
+                  id: channel.id || "remote-default",
+                  protocol: channel.protocol,
+                  name: channel.name || "鑫元宝官方模型服务",
+                  models: channel.models || [],
+              }))
+            : normalizeLocalChannels(config).map((channel) => ({
+                  id: channel.id,
+                  protocol: channel.protocol,
+                  name: channel.name || "本地渠道",
+                  models: channel.models || [],
+              }));
+
+        // 展开通配符渠道和官方专属渠道为平台可用模型全集
+        const list = rawChannels.map((ch) => {
+            if (ch.id === "xyb-official-exclusive" || ch.models.includes("*") || ch.models.length === 0) {
+                return {
+                    ...ch,
+                    name: ch.name || "鑫元宝官方模型服务",
+                    models: normalizeModelList([
+                        ...ch.models.filter((m) => m !== "*"),
+                        ...availablePlatformModels,
+                    ]),
+                };
+            }
+            return ch;
+        });
+
+        // 若当前列表无有效模型，兜底注入官方平台全量模型渠道
+        if (list.length === 0 || list.every((ch) => ch.models.length === 0)) {
+            return [
+                {
+                    id: "xyb-official-exclusive",
+                    protocol: "openai" as const,
+                    name: "鑫元宝官方模型服务",
+                    models: availablePlatformModels,
+                },
+            ];
+        }
+        return list;
+    }, [config, availablePlatformModels]);
+
+    const allModels = useMemo(() => {
+        const seen = new Set<string>();
+        const list: Array<{ channelId: string; channelName: string; protocol?: string; model: string }> = [];
+
+        channels.forEach((channel) => {
+            (channel.models ?? []).forEach((m) => {
+                if (m && m !== "*" && !seen.has(m)) {
+                    seen.add(m);
+                    list.push({
+                        channelId: channel.id,
+                        channelName: channel.name || "鑫元宝官方模型服务",
+                        protocol: channel.protocol,
+                        model: m,
+                    });
+                }
+            });
+        });
+
+        // 额外补齐：若平台可用模型有遗漏，自动加入官方渠道模型
+        availablePlatformModels.forEach((m) => {
+            if (m && !seen.has(m)) {
+                seen.add(m);
+                list.push({
+                    channelId: "xyb-official-exclusive",
+                    channelName: "鑫元宝官方模型服务",
+                    protocol: "openai",
+                    model: m,
+                });
+            }
+        });
+
+        return list;
+    }, [channels, availablePlatformModels]);
+
+    const filteredModels = useMemo(() => {
+        if (!capability) return allModels;
+        const matched = allModels.filter(
+            (item) => filterModelsByCapability([item.model], capability, item.protocol || "").length > 0
+        );
+        return matched.length > 0 ? matched : allModels;
+    }, [allModels, capability]);
+
+    // 智能构建 AutoComplete 下拉选项（两行优雅排版，自动换行）
+    const options = useMemo(() => {
+        // 核心体验优化：如果当前输入框的值等于当前已选中的模型名称（用户尚未主动输入新搜索词），
+        // 则不作为过滤条件过滤其他模型，展示当前能力下的全部可用候选模型，支持直接点击切换；
+        // 仅当用户主动退格修改或键入新关键词搜索时，才执行模糊过滤。
+        const isUnchangedValue = (inputValue || "").trim().toLowerCase() === (value || "").trim().toLowerCase();
+        const query = isUnchangedValue ? "" : inputValue.trim().toLowerCase();
+
+        let matched = filteredModels.filter((item) => !query || item.model.toLowerCase().includes(query));
+
+        // 如果用户尚未进行搜索输入（展现全部模型），将当前已选中的模型优先排在最前面并保持高亮
+        if (isUnchangedValue && value) {
+            const currentIdx = matched.findIndex((item) => item.model.toLowerCase() === value.trim().toLowerCase());
+            if (currentIdx > 0) {
+                const currentItem = matched[currentIdx];
+                matched = [currentItem, ...matched.slice(0, currentIdx), ...matched.slice(currentIdx + 1)];
+            }
+        }
+
+        const result = matched.map((item) => {
+            const pricing = getModelPricing(item.model);
+            const isSelected = (value || "").trim().toLowerCase() === item.model.toLowerCase();
+            return {
+                value: item.model,
+                label: (
+                    <div className={cn(
+                        "flex flex-col gap-1 py-1.5 px-1 text-xs border-b border-stone-100/60 dark:border-stone-800/60 last:border-b-0 rounded transition-colors",
+                        isSelected && "bg-stone-100/60 dark:bg-stone-800/50"
+                    )}>
+                        {/* 第一行：模型图标 + 模型全名 + 选中状态徽标 */}
+                        <div className="flex items-start justify-between gap-1.5">
+                            <div className="flex items-start gap-1.5 min-w-0">
+                                <span className="mt-0.5 shrink-0">
+                                    <ModelIcon model={item.model} />
+                                </span>
+                                <span className="font-semibold text-stone-900 dark:text-stone-100 break-all leading-snug whitespace-normal">
+                                    {item.model}
+                                </span>
+                            </div>
+                            {isSelected ? (
+                                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                                    <Check className="size-2.5 stroke-[3]" />
+                                    当前
+                                </span>
+                            ) : null}
+                        </div>
+                        {/* 第二行：单价/积分标签 + 渠道信息（字号稍小、浅灰色次级展示） */}
+                        <div className="flex items-center justify-between gap-2 pl-5 text-[11px] text-stone-400 dark:text-stone-500">
+                            <span className="truncate">
+                                {pricing ? (
+                                    <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-mono font-medium">
+                                        <Zap className="size-3 fill-current" />
+                                        {pricing.quota_type === 1 ? `${pricing.points_cost} 积分/次` : "按量扣费"}
+                                    </span>
+                                ) : (
+                                    <span>{item.channelName || "官方模型服务"}</span>
+                                )}
+                            </span>
+                            {pricing && item.channelName ? (
+                                <span className="shrink-0 text-[10px] opacity-75">
+                                    {item.channelName}
+                                </span>
+                            ) : null}
+                        </div>
+                    </div>
+                ),
+            };
+        });
+
+        // 如果用户主动输入了新关键词且不在匹配列表中，提供“使用自定义模型”快捷选项
+        const exactMatch = filteredModels.some((item) => item.model.toLowerCase() === query);
+        if (query && !exactMatch && !isUnchangedValue) {
+            result.unshift({
+                value: inputValue.trim(),
+                label: (
+                    <div className="flex items-center gap-1.5 py-1 px-0.5 text-xs font-semibold text-blue-600 dark:text-blue-400">
+                        <Sparkles className="size-3.5 shrink-0" />
+                        <span className="break-all whitespace-normal">使用自定义模型: {inputValue.trim()}</span>
+                    </div>
+                ),
+            });
+        }
+
+        return result;
+    }, [filteredModels, inputValue, value]);
+
+    const applyModel = (targetModel: string) => {
+        const trimmed = targetModel.trim();
+        if (!trimmed) {
+            onChange("", channelId);
+            return;
+        }
+
+        // 如果用户输入了新模型，自动写入当前渠道的 models 列表并持久化保存
+        const effectiveChannelId = channelId || channels[0]?.id || "";
+        if (effectiveChannelId && config.channelMode === "local") {
+            const currentChannels = normalizeLocalChannels(config);
+            const targetChannel = currentChannels.find((c) => c.id === effectiveChannelId) || currentChannels[0];
+            if (targetChannel && !targetChannel.models.includes(trimmed)) {
+                const nextChannels = currentChannels.map((c) => {
+                    if (c.id === targetChannel.id) {
+                        return { ...c, models: [...c.models, trimmed] };
+                    }
+                    return c;
+                });
+                useConfigStore.getState().updateConfig("localChannels", nextChannels);
+                useConfigStore.getState().updateConfig("models", normalizeModelList(nextChannels.flatMap((c) => c.models)));
+            }
+        }
+
+        onChange(trimmed, effectiveChannelId);
+    };
+
+    return (
+        <AutoComplete
+            value={inputValue}
+            options={options}
+            popupMatchSelectWidth={false}
+            dropdownStyle={{ minWidth: 300, maxWidth: 460, maxHeight: 380, overflowY: "auto" }}
+            defaultActiveFirstOption={false}
+            onChange={(val) => {
+                setInputValue(val);
+            }}
+            onSelect={(val) => {
+                setInputValue(val);
+                applyModel(val);
+            }}
+            onBlur={() => {
+                applyModel(inputValue);
+            }}
+            className="w-full"
+        >
+            <Input
+                prefix={<ModelIcon model={inputValue} />}
+                suffix={<ChevronDown className="size-3.5 text-stone-400 opacity-60 pointer-events-none" />}
+                placeholder={placeholder}
+                allowClear
+                onFocus={(e) => {
+                    // 聚焦时自动全选，用户若要搜索一键打字即换，若要选择则直接在下拉中点选全部模型
+                    e.target.select();
+                }}
+                onPressEnter={() => applyModel(inputValue)}
+            />
+        </AutoComplete>
+    );
+}
+
+function ModelIcon({ model }: { model: string }) {
+    const icon = resolveModelIcon(model);
+    return icon ? <img src={icon} alt="" className="size-3.5 shrink-0 dark:invert" /> : <Cpu className="size-3.5 shrink-0 opacity-70" />;
+}
+
+function resolveModelIcon(model: string) {
+    const name = (model || "").toLowerCase();
+    if (name.includes("claude") || name.includes("anthropic")) return "/icons/claude.svg";
+    if (name.includes("gemini") || name.includes("google")) return "/icons/gemini.svg";
+    if (name.includes("gpt") || name.includes("openai") || name.includes("dall-e")) return "/icons/openai.svg";
+    if (name.includes("grok")) return "/icons/grok.svg";
+    if (name.includes("deepseek")) return "/icons/deepseek.svg";
+    if (name.includes("glm") || name.includes("cogview")) return "/icons/glm.svg";
+    return "";
+}

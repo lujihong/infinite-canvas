@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowUp, Brain, FolderOpen, ImageIcon, Menu, Square, Upload, Video } from "lucide-react";
-import { Button, Dropdown } from "antd";
+import { ArrowUp, Brain, FolderOpen, ImageIcon, Menu, Square, Upload, Video, Zap } from "lucide-react";
+import { Button, Dropdown, Tooltip } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { cn } from "@/lib/utils";
 import { useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasAgentConfig, type CanvasAgentSkillSelection, type CanvasAssistantReference } from "../types";
@@ -85,8 +86,8 @@ export function CanvasAssistantComposer({
                     placeholder="描述创作目标，或让我继续操作画布"
                     placeholderClassName="!left-1 !top-0"
                 />
-                <div className="mt-2 flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 flex-1 items-center gap-1">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-y-2 gap-x-1.5 pt-1">
+                    <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
                         <Dropdown
                             trigger={["click"]}
                             menu={{
@@ -97,7 +98,7 @@ export function CanvasAssistantComposer({
                                 onClick: ({ key }) => (key === "upload" ? onOpenUpload() : onOpenAssets()),
                             }}
                         >
-                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={{ color: theme.node.text }} icon={<Menu className="size-4" />} aria-label="添加素材" />
+                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8 shrink-0" style={{ color: theme.node.text }} icon={<Menu className="size-4" />} aria-label="添加素材" />
                         </Dropdown>
                         {onSkillSelect && onSkillRemove ? <CanvasAgentSkillPopover selectedSkills={selectedSkills} onSelect={onSkillSelect} onDeleteSelected={onSkillRemove} /> : null}
                         <CanvasImageSettingsPopover
@@ -105,7 +106,7 @@ export function CanvasAssistantComposer({
                             placement="topLeft"
                             showCount={false}
                             buttonIcon={<ImageIcon className="size-3.5" />}
-                            buttonClassName="!h-8 !max-w-[116px] !justify-start !rounded-full !px-2.5"
+                            buttonClassName="!h-8 !max-w-[116px] shrink-0 !justify-start !rounded-full !px-2.5"
                             onConfigChange={(key, value) => {
                                 if (key === "quality") onAgentConfigChange({ imageQuality: value });
                                 else if (key === "size") onAgentConfigChange({ imageSize: value });
@@ -116,14 +117,29 @@ export function CanvasAssistantComposer({
                             placement="topLeft"
                             visualOnly
                             buttonIcon={<Video className="size-3.5" />}
-                            buttonClassName="!h-8 !max-w-[124px] !justify-start !rounded-full !px-2.5"
+                            buttonClassName="!h-8 !max-w-[124px] shrink-0 !justify-start !rounded-full !px-2.5"
                             onConfigChange={(key, value) => {
                                 if (key === "vquality") onAgentConfigChange({ videoQuality: value });
                                 else if (key === "size") onAgentConfigChange({ videoSize: value });
                             }}
                         />
+                        <Tooltip title={agentConfig.autoGenerateMedia ? "自动生成媒体：开启（Agent 创建节点后立即提交生成任务）" : "自动生成媒体：关闭（仅在画布上创建空节点，需手动点击生成）"}>
+                            <button
+                                type="button"
+                                onClick={() => onAgentConfigChange({ autoGenerateMedia: !agentConfig.autoGenerateMedia })}
+                                className={cn(
+                                    "inline-flex h-8 shrink-0 cursor-pointer select-none items-center gap-1 rounded-full px-2.5 text-xs font-medium transition",
+                                    agentConfig.autoGenerateMedia
+                                        ? "border border-blue-500/30 bg-blue-500/15 text-blue-600 dark:border-blue-500/40 dark:bg-blue-950/60 dark:text-blue-400"
+                                        : "border border-stone-200 bg-stone-100 text-stone-500 hover:text-stone-700 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-400 dark:hover:text-stone-200"
+                                )}
+                            >
+                                <Zap className="size-3.5" />
+                                <span>{agentConfig.autoGenerateMedia ? "自动生成" : "仅建节点"}</span>
+                            </button>
+                        </Tooltip>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div className="flex shrink-0 items-center gap-1 ml-auto">
                         <Dropdown
                             trigger={["click"]}
                             placement="topRight"
@@ -137,12 +153,12 @@ export function CanvasAssistantComposer({
                                 onClick: ({ key }) => onAgentConfigChange({ textApiMode: key as CanvasAgentConfig["textApiMode"] }),
                             }}
                         >
-                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={{ color: theme.node.text }} icon={<Brain className="size-4" />} aria-label={`文本接口：${agentConfig.textApiMode === "responses" ? "Responses" : "Chat"}`} />
+                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8 shrink-0" style={{ color: theme.node.text }} icon={<Brain className="size-4" />} aria-label={`文本接口：${agentConfig.textApiMode === "responses" ? "Responses" : "Chat"}`} />
                         </Dropdown>
                         <Button
                             type="primary"
                             shape="circle"
-                            className="!size-10 !min-w-10"
+                            className="!size-10 !min-w-10 shrink-0 shadow-md"
                             disabled={!isRunning && !prompt.trim()}
                             onClick={() => (isRunning ? onStop?.() : void submit())}
                             aria-label={isRunning ? "停止" : "发送"}

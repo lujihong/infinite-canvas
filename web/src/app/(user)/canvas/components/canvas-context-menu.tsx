@@ -2,14 +2,14 @@
 
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { BetweenHorizontalStart, GalleryHorizontal, GalleryHorizontalEnd, Plus, Trash2 } from "lucide-react";
+import { BetweenHorizontalStart, GalleryHorizontal, GalleryHorizontalEnd, Plus, Scissors, Trash2 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ContextMenuState } from "../types";
 import type { VideoFramePosition } from "../utils/canvas-video-frame";
 
-export function CanvasNodeContextMenu({ menu, canCaptureVideoFrame, onClose, onCaptureVideoFrame, onDuplicate, onDelete }: { menu: ContextMenuState; canCaptureVideoFrame: boolean; onClose: () => void; onCaptureVideoFrame: (position: VideoFramePosition) => void; onDuplicate: () => void; onDelete: () => void }) {
+export function CanvasNodeContextMenu({ menu, canCaptureVideoFrame, onClose, onCaptureVideoFrame, onOpenVideoEditor, onDuplicate, onDelete }: { menu: ContextMenuState; canCaptureVideoFrame: boolean; onClose: () => void; onCaptureVideoFrame: (position: VideoFramePosition) => void; onOpenVideoEditor?: () => void; onDuplicate: () => void; onDelete: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     useEffect(() => {
@@ -30,6 +30,9 @@ export function CanvasNodeContextMenu({ menu, canCaptureVideoFrame, onClose, onC
         >
             {canCaptureVideoFrame ? (
                 <>
+                    {onOpenVideoEditor ? (
+                        <MenuButton icon={<Scissors className="size-4 text-amber-400" />} label="进入视频剪辑" onClick={onOpenVideoEditor} />
+                    ) : null}
                     <MenuButton icon={<BetweenHorizontalStart className="size-4" />} label="截取首帧" onClick={() => onCaptureVideoFrame("first")} />
                     <MenuButton icon={<GalleryHorizontalEnd className="size-4" />} label="截取尾帧" onClick={() => onCaptureVideoFrame("last")} />
                     <MenuButton icon={<GalleryHorizontal className="size-4" />} label="截取当前帧" onClick={() => onCaptureVideoFrame("current")} />

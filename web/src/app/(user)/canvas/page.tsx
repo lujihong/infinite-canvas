@@ -30,7 +30,7 @@ export default function CanvasPage() {
     const enterProject = (id: string) => {
         router.push(`/canvas/${id}`);
     };
-    const createAndEnter = () => enterProject(createProject(`新元宝项目 ${projects.length + 1}`));
+    const createAndEnter = () => enterProject(createProject(`新项目 ${projects.length + 1}`));
     const importCanvas = async (file?: File) => {
         if (!file) return;
         try {
@@ -68,7 +68,7 @@ export default function CanvasPage() {
                     <div className="flex items-center gap-2">
                         {selectedIds.length ? (
                             <>
-                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `新元宝项目-${selectedIds.length}个项目`)}>
+                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `新项目-${selectedIds.length}个项目`)}>
                                     导出选中
                                 </Button>
                                 <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>

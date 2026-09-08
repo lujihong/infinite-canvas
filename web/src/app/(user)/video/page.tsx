@@ -8,6 +8,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
+import { CreditSymbol, formatModelCostTag } from "@/constant/credits";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { KlingV26WorkbenchPanel } from "@/app/(user)/video/components/kling-v26-workbench-panel";
@@ -21,11 +22,12 @@ import { COGVIDEOX3_DURATIONS, isAgnesVideoV25Model, isCogVideoX3Model, modelKey
 import { deleteStoredMedia, downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { deleteVideoGenerationLogs, fetchVideoGenerationLogs, saveVideoGenerationLogs } from "@/services/api/generation-logs";
-import { createVideoGenerationTask, deleteVideoGenerationTask, listVideoGenerationTasks, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, VideoRequestError, type VideoResponse } from "@/services/api/video";
+import { createVideoGenerationTask, deleteVideoGenerationTask, formatPlayableVideoUrl, listVideoGenerationTasks, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, VideoRequestError, type VideoResponse } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { channelProtocolForConfig, normalizeLocalChannels, useConfigStore, useEffectiveConfig, type AiConfig, type VideoElementItem, type VideoElementReference } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { useWalletStore } from "@/stores/use-wallet-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -99,7 +101,18 @@ type WorkbenchLayout = "side" | "bottom";
 type AssetPickerTarget = "general" | "image" | "video" | "audio" | "firstFrame" | "lastFrame" | "element";
 
 const WORKBENCH_LAYOUT_KEY = "infinite-canvas:video-workbench-layout";
-const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
+const videoLogStorePool = new Map<string, LocalForage>();
+
+function getVideoLogStore(userId?: string): LocalForage {
+    const currentUserId = userId || useUserStore.getState().user?.id || "guest";
+    const storeName = `video_generation_logs_${currentUserId}`;
+    let store = videoLogStorePool.get(storeName);
+    if (!store) {
+        store = localforage.createInstance({ name: "infinite-canvas", storeName });
+        videoLogStorePool.set(storeName, store);
+    }
+    return store;
+}
 export default function VideoPage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -196,7 +209,6 @@ export default function VideoPage() {
     }, [pendingLogCount]);
 
     useEffect(() => {
-        void refreshLogs().then((items) => syncBackendVideoTasks(items));
         try {
             const storedLayout = window.localStorage?.getItem(WORKBENCH_LAYOUT_KEY);
             if (storedLayout === "side" || storedLayout === "bottom") setWorkbenchLayoutState(storedLayout);
@@ -218,7 +230,14 @@ export default function VideoPage() {
     }, [logs]);
 
     useEffect(() => {
-        if (!isUserReady || !token) return;
+        if (!isUserReady) return;
+        if (!token) {
+            setLogs([]);
+            setResults([]);
+            setPreviewLog(null);
+            setSelectedLogIds([]);
+            return;
+        }
         void loadAccountVideoHistory(token).then((items) => syncBackendVideoTasks(items || logsRef.current));
     }, [isUserReady, token]);
 
@@ -561,6 +580,11 @@ export default function VideoPage() {
     };
 
     const generate = async () => {
+        if (!useWalletStore.getState().checkBalanceOrIntercept(() => {
+            message.warning("当前账户算力余额不足，请先充值算力后再体验创作");
+        })) {
+            return;
+        }
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
         setPrompt("");
@@ -641,7 +665,7 @@ export default function VideoPage() {
             const task: VideoResponse = { id: clientTaskId, task_id: clientTaskId, model: snapshot.model, status: "queued", progress: 0, created_at: Date.now(), size: snapshot.config.size, seconds: snapshot.config.videoSeconds };
             return buildLog({ prompt: snapshot.text, model: snapshot.model, config: snapshot.config, references: snapshot.references, firstFrame: snapshot.firstFrame, lastFrame: snapshot.lastFrame, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task, taskCount: snapshot.taskCount, lastPolledAt: Date.now() });
         });
-        await Promise.all(pendingLogs.map((log) => logStore.setItem(log.id, serializeLog(log))));
+        await Promise.all(pendingLogs.map((log) => getVideoLogStore().setItem(log.id, serializeLog(log))));
         setLogs((value) => sortVideoLogs([...pendingLogs, ...value]));
         setResults((value) => sortVideoResults([...pendingLogs.map((log) => createResultFromLog(log, "pending")), ...value]));
         try {
@@ -668,6 +692,7 @@ export default function VideoPage() {
             const nextLog = { ...pendingLog, task: created.task, lastPolledAt: Date.now() };
             await saveGenerationLog(nextLog);
             setResults((value) => updateResultByLogId(value, pendingLog.id, { progress: created.task.progress, task: created.task, taskLogId: nextLog.id, lastPolledAt: nextLog.lastPolledAt }));
+            void useWalletStore.getState().triggerWalletSync();
             return nextLog;
         } catch (error) {
             const durationMs = Date.now() - pendingLog.createdAt;
@@ -675,11 +700,17 @@ export default function VideoPage() {
             await saveGenerationLog(nextLog);
             await persistVideoLog(nextLog);
             setResults((value) => updateResultByLogId(value, pendingLog.id, { status: "failed", taskLogId: nextLog.id, error: nextLog.error, errorDetail: nextLog.errorDetail, durationMs }));
+            void useWalletStore.getState().triggerWalletSync();
             return nextLog;
         }
     };
 
     const retryResult = (result: GenerationResult) => {
+        if (!useWalletStore.getState().checkBalanceOrIntercept(() => {
+            message.warning("当前账户算力余额不足，请先充值算力后再重试");
+        })) {
+            return;
+        }
         const retryChannelId = videoTaskChannelId(result.task);
         const snapshot = buildRequestSnapshot({ promptText: result.prompt, negativePromptText: result.config.videoNegativePrompt || "", referenceItems: result.references, firstFrameItem: result.firstFrame, lastFrameItem: result.lastFrame, videoReferenceItems: result.videoReferences, audioReferenceItems: result.audioReferences, taskCountValue: 1, configValue: { ...videoConfig, ...result.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: result.model, videoModel: result.model }, modelValue: result.model });
         if (!snapshot) return;
@@ -756,7 +787,7 @@ export default function VideoPage() {
         const synced = await syncVideo(video, index);
         if (!synced) return;
         const nextLog = { ...log, video: synced };
-        await logStore.setItem(log.id, serializeLog(nextLog));
+        await getVideoLogStore().setItem(log.id, serializeLog(nextLog));
         const nextLogs = logs.map((item) => (item.id === log.id ? nextLog : item));
         setLogs(nextLogs);
         await persistVideoLog(nextLog);
@@ -879,7 +910,7 @@ export default function VideoPage() {
         setLogs(nextLogs);
         logsRef.current = nextLogs;
         setResults((value) => value.filter((item) => !selectedLogIds.includes(item.id) && !selectedLogIds.includes(item.taskLogId || "") && !videoResultIdentityKeys(item).some((key) => deleteKeys.has(key))));
-        void Promise.all([deleteBackendVideoTasks(deletedLogs), deleteAccountVideoLogs(deletedLogs), deleteStoredMedia(keys.media), deleteStoredImages(keys.images), ...deletedLogs.map((log) => logStore.removeItem(log.id))]).catch(() => undefined);
+        void Promise.all([deleteBackendVideoTasks(deletedLogs), deleteAccountVideoLogs(deletedLogs), deleteStoredMedia(keys.media), deleteStoredImages(keys.images), ...deletedLogs.map((log) => getVideoLogStore().removeItem(log.id))]).catch(() => undefined);
         if (previewLog && deletedLogs.some((log) => log.id === previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -947,7 +978,7 @@ export default function VideoPage() {
     };
 
     const saveGenerationLog = async (log: GenerationLog) => {
-        await logStore.setItem(log.id, serializeLog(log));
+        await getVideoLogStore().setItem(log.id, serializeLog(log));
         setLogs((value) => sortVideoLogs([log, ...value.filter((item) => item.id !== log.id)]));
     };
 
@@ -969,6 +1000,7 @@ export default function VideoPage() {
                 const nextLog = { ...baseLog, status: "失败" as const, error: task.error?.message || "视频生成失败", errorDetail: errorDetail(new VideoRequestError(task.error?.message || "视频生成失败", task)) };
                 await finalizeGenerationLog(nextLog);
                 setResults((value) => updateResultByLogId(value, log.id, { status: "failed", task, error: nextLog.error, errorDetail: nextLog.errorDetail, durationMs: nextLog.durationMs, lastPolledAt: nextLog.lastPolledAt }));
+                void useWalletStore.getState().triggerWalletSync();
                 return;
             }
             if (isCompletedVideoTask(task)) {
@@ -976,12 +1008,14 @@ export default function VideoPage() {
                     const nextLog = { ...baseLog, status: "失败" as const, error: "视频生成完成但没有返回视频地址", errorDetail: errorDetail(new VideoRequestError("视频生成完成但没有返回视频地址", task)) };
                     await finalizeGenerationLog(nextLog);
                     setResults((value) => updateResultByLogId(value, log.id, { status: "failed", task, error: nextLog.error, errorDetail: nextLog.errorDetail, durationMs: nextLog.durationMs, lastPolledAt: nextLog.lastPolledAt }));
+                    void useWalletStore.getState().triggerWalletSync();
                     return;
                 }
                 const video = videoFromTaskResponse(task, durationMs);
                 const nextLog = { ...baseLog, status: "成功" as const, video, error: undefined, errorDetail: undefined };
                 await finalizeGenerationLog(nextLog);
                 setResults((value) => value.filter((item) => item.taskLogId !== log.id && item.id !== log.id));
+                void useWalletStore.getState().triggerWalletSync();
                 return;
             }
             await saveGenerationLog(baseLog);
@@ -1406,8 +1440,12 @@ function WorkbenchPanel({
                                 <Button title="我的素材" icon={<FolderPlus className="size-4" />} onClick={() => onOpenAssetPicker()} />
                                 <Button title="参数配置" className={`lg:hidden ${!bottomSettingsCollapsed ? "!border-sky-500/30 !bg-sky-500/10 !text-sky-500" : ""}`} icon={<SlidersHorizontal className="size-4" />} onClick={() => setBottomSettingsCollapsed?.(!bottomSettingsCollapsed)} />
                                 <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
-                                <Button type="primary" className="h-9 rounded-xl px-4 font-medium lg:!hidden" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
-                                    {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
+                                <Button type="primary" className="h-9 rounded-xl px-3 font-medium lg:!hidden" disabled={!canGenerate} onClick={onGenerate}>
+                                    <span className="flex items-center gap-1 text-xs">
+                                        <Sparkles className="size-3.5" />
+                                        <span>{pendingCount ? `${pendingCount} 生成中` : "生成"}</span>
+                                        <span>({formatModelCostTag({ model, mode: "video", seconds: config.videoSeconds, resolution: config.vquality || config.size, count: taskCount })})</span>
+                                    </span>
                                 </Button>
                             </div>
                         </div>
@@ -1438,8 +1476,15 @@ function WorkbenchPanel({
                             )}
                             <QuickNumber label="任务" value={String(taskCount)} min={1} max={6} onChange={(value) => onTaskCountChange(normalizeVideoCount(value))} />
                             <ReferenceQuickActions imageCount={references.length} videoCount={videoReferences.length} audioCount={audioReferences.length} onPasteReferences={onPasteReferences} onUploadReferences={onUploadReferences} />
-                            <Button type="primary" className="hidden h-11 min-w-28 items-center justify-center gap-1.5 rounded-xl lg:flex" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
-                                {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
+                            <Button type="primary" className="hidden h-11 min-w-32 items-center justify-center gap-2 rounded-xl lg:flex font-semibold shadow-sm" disabled={!canGenerate} onClick={onGenerate}>
+                                <span className="flex items-center gap-1.5">
+                                    <Sparkles className="size-4" />
+                                    <span>{pendingCount ? `${pendingCount} 生成中` : "开始创作"}</span>
+                                    <span className="inline-flex items-center gap-1 rounded bg-black/15 px-2 py-0.5 text-xs font-mono font-medium dark:bg-white/15">
+                                        <CreditSymbol />
+                                        <span>{formatModelCostTag({ model, mode: "video", seconds: config.videoSeconds, resolution: config.vquality || config.size, count: taskCount })}</span>
+                                    </span>
+                                </span>
                             </Button>
                         </div>
                         {firstFrame || lastFrame || references.length || videoReferences.length || audioReferences.length ? (
@@ -1515,8 +1560,15 @@ function WorkbenchPanel({
                 </WorkbenchSection>
             </div>
             <div className="shrink-0 border-t border-stone-200 p-4 dark:border-stone-800">
-                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
-                    {pendingCount ? `生成中（${pendingCount}）` : "开始生成"}
+                <Button type="primary" size="large" block disabled={!canGenerate} onClick={onGenerate} className="!h-11 !rounded-xl font-semibold shadow-sm">
+                    <span className="flex items-center justify-center gap-2">
+                        <Sparkles className="size-4" />
+                        <span>{pendingCount ? `生成中（${pendingCount}）` : "开始生成"}</span>
+                        <span className="inline-flex items-center gap-1 rounded bg-black/15 px-2 py-0.5 text-xs font-mono font-medium dark:bg-white/15">
+                            <CreditSymbol />
+                            <span>{formatModelCostTag({ model, mode: "video", seconds: config.videoSeconds, resolution: config.vquality || config.size, count: taskCount })}</span>
+                        </span>
+                    </span>
                 </Button>
             </div>
         </div>
@@ -1866,7 +1918,7 @@ function ResultVideoCard({ result, video, index, syncing, onCopyPrompt, onDownlo
                     <Tag className="m-0 text-[10px]" color="blue">成功</Tag>
                 </div>
                 <ReferenceThumbnailOverlay references={result.references} className="left-1.5 top-1.5" />
-                <video src={video.url} controls className="size-full object-contain" />
+                <video src={formatPlayableVideoUrl(video.url, result.model)} controls className="size-full object-contain" />
             </div>
             <TaskInfo item={result} onCopyPrompt={onCopyPrompt} />
             <VideoMetaBar video={video} index={index} syncing={syncing} onDownload={onDownload} onSync={onSync} onSaveAsset={onSaveAsset} />
@@ -1945,7 +1997,7 @@ function HistoryLogCard({ log, index, selected, active, syncing, onSelectedChang
                     {log.video ? <VideoSourceTag video={log.video} /> : null}
                     <Tag className="m-0 text-[10px]" color={log.status === "成功" ? "blue" : log.status === "生成中" ? "processing" : "red"}>{log.status}</Tag>
                 </div>
-                {log.video ? <video src={log.video.url} controls className="size-full bg-black object-contain" /> : <div className="flex size-full flex-col items-center justify-center gap-2 p-5 text-center text-sm text-red-500"><AlertCircle className="size-7" /><span>{log.error || "没有可显示的视频"}</span></div>}
+                {log.video ? <video src={formatPlayableVideoUrl(log.video.url, log.model)} controls className="size-full bg-black object-contain" /> : <div className="flex size-full flex-col items-center justify-center gap-2 p-5 text-center text-sm text-red-500"><AlertCircle className="size-7" /><span>{log.error || "没有可显示的视频"}</span></div>}
                 <ReferenceThumbnailOverlay references={log.references} className="bottom-1.5 right-1.5" />
             </div>
             <div className="space-y-2 border-t border-stone-200 p-2.5 text-xs dark:border-stone-800">
@@ -2116,8 +2168,8 @@ async function replaceStoredVideoHistory(logs: GenerationLog[]) {
     if (typeof window === "undefined") return;
     await persistStoredVideoLogs(logs);
     const keepIds = new Set(logs.map((log) => log.id));
-    const storedKeys = await logStore.keys();
-    await Promise.all(storedKeys.filter((key) => !keepIds.has(key)).map((key) => logStore.removeItem(key)));
+    const storedKeys = await getVideoLogStore().keys();
+    await Promise.all(storedKeys.filter((key) => !keepIds.has(key)).map((key) => getVideoLogStore().removeItem(key)));
 }
 
 async function persistStoredVideoLogs(logs: GenerationLog[]) {
@@ -2125,9 +2177,9 @@ async function persistStoredVideoLogs(logs: GenerationLog[]) {
     await Promise.all(
         logs.map(async (log) => {
             const serialized = serializeLog(log);
-            const current = await logStore.getItem<GenerationLog>(log.id);
+            const current = await getVideoLogStore().getItem<GenerationLog>(log.id);
             if (current && JSON.stringify(current) === JSON.stringify(serialized)) return;
-            await logStore.setItem(log.id, serialized);
+            await getVideoLogStore().setItem(log.id, serialized);
         }),
     );
 }
@@ -2324,7 +2376,7 @@ function parseRecord(value: unknown) {
     return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-function fieldString(value: unknown) {
+function fieldString(value: unknown): string {
     if (typeof value === "string") return value.trim();
     if (typeof value === "number" || typeof value === "boolean") return String(value);
     if (Array.isArray(value)) return fieldString(value[0]);
@@ -2547,7 +2599,7 @@ async function readStoredLogs() {
     if (typeof window === "undefined") return [];
     try {
         const logs: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
+        await getVideoLogStore().iterate<GenerationLog, void>((value) => {
             logs.push(value);
         });
         return (await normalizeLogsSafely(logs)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -2844,7 +2896,7 @@ function isKIEKlingModelConfig(config: AiConfig, model: string, key: string) {
 
 function videoChannelProtocol(config: AiConfig, model: string) {
     const channelId = resolveVideoChannelId(config, model, config.videoChannelId, config.activeChannelId);
-    const channels = config.channelMode === "remote" ? config.publicChannels : normalizeLocalChannels(config);
+    const channels: Array<{ id?: string; protocol?: string; models?: string[] }> = config.channelMode === "remote" ? config.publicChannels : normalizeLocalChannels(config);
     const channel = channels.find((item) => (item.id || "") === channelId && (item.models || []).includes(model)) || channels.find((item) => (item.models || []).includes(model)) || channels.find((item) => (item.id || "") === channelId);
     return channel?.protocol || "openai";
 }

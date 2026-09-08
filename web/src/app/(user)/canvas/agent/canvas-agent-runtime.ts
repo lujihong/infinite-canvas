@@ -273,7 +273,7 @@ function persistCanvasAgentProtocolMessages(messages: CanvasAgentProtocolMessage
     return messages.map((message): CanvasAgentProtocolMessage => {
         if ((message.role === "user" || message.role === "system") && Array.isArray(message.content)) {
             const text = message.content
-                .filter((item) => item.type === "text")
+                .filter((item): item is { type: "text"; text: string } => item.type === "text")
                 .map((item) => item.text)
                 .join("\n")
                 .trim();

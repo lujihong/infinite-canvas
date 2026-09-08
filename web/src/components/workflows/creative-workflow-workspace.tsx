@@ -184,9 +184,42 @@ type GenerationCategory = { id: string; name: string; createdAt: number };
 const WORKFLOW_STORE_KEY = "infinite-canvas:creative-workflows";
 const SERIES_DRAFT_STORE_PREFIX = "infinite-canvas:series-drafts:";
 const CATEGORY_STORE_KEY = "infinite-canvas:image_generation_categories";
-const workflowStore = localforage.createInstance({ name: "infinite-canvas", storeName: "creative_workflows" });
-const imageLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
-const categoryStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_categories" });
+const workflowStorePool = new Map<string, LocalForage>();
+const workflowImageLogStorePool = new Map<string, LocalForage>();
+const workflowCategoryStorePool = new Map<string, LocalForage>();
+
+function getWorkflowStore(userId?: string): LocalForage {
+    const currentUserId = userId || useUserStore.getState().user?.id || "guest";
+    const storeName = `creative_workflows_${currentUserId}`;
+    let store = workflowStorePool.get(storeName);
+    if (!store) {
+        store = localforage.createInstance({ name: "infinite-canvas", storeName });
+        workflowStorePool.set(storeName, store);
+    }
+    return store;
+}
+
+function getWorkflowImageLogStore(userId?: string): LocalForage {
+    const currentUserId = userId || useUserStore.getState().user?.id || "guest";
+    const storeName = `image_generation_logs_${currentUserId}`;
+    let store = workflowImageLogStorePool.get(storeName);
+    if (!store) {
+        store = localforage.createInstance({ name: "infinite-canvas", storeName });
+        workflowImageLogStorePool.set(storeName, store);
+    }
+    return store;
+}
+
+function getWorkflowCategoryStore(userId?: string): LocalForage {
+    const currentUserId = userId || useUserStore.getState().user?.id || "guest";
+    const storeName = `image_generation_categories_${currentUserId}`;
+    let store = workflowCategoryStorePool.get(storeName);
+    if (!store) {
+        store = localforage.createInstance({ name: "infinite-canvas", storeName });
+        workflowCategoryStorePool.set(storeName, store);
+    }
+    return store;
+}
 
 const variableTypeOptions: Array<{ value: WorkflowVariableType; label: string }> = [
     { value: "text", label: "短文本" },
@@ -272,6 +305,15 @@ export function CreativeWorkflowWorkspace({
 
     useEffect(() => {
         if (!isUserReady) return;
+        if (!token) {
+            setWorkflows([]);
+            setRunResults([]);
+            setWorkflowTasks([]);
+            setEditingWorkflow(null);
+            setRunningWorkflow(null);
+            setSeriesDrafts([]);
+            return;
+        }
         void refreshWorkflows();
     }, [isUserReady, token]);
 
@@ -288,7 +330,7 @@ export function CreativeWorkflowWorkspace({
 
     useEffect(() => {
         if (!runningWorkflow || runningWorkflow.mode !== "multi_image_series" || !seriesDraftsLoadedRef.current) return;
-        void workflowStore.setItem(seriesDraftStorageKey(runningWorkflow.id), seriesDrafts);
+        void getWorkflowStore().setItem(seriesDraftStorageKey(runningWorkflow.id), seriesDrafts);
     }, [runningWorkflow?.id, runningWorkflow?.mode, seriesDrafts]);
 
     const refreshWorkflows = async () => {
@@ -301,10 +343,10 @@ export function CreativeWorkflowWorkspace({
                 const workflows = remote.map(recordToWorkflow).sort((a, b) => b.updatedAt - a.updatedAt);
                 if (workflows.length) {
                     setWorkflows(workflows);
-                    await workflowStore.setItem(WORKFLOW_STORE_KEY, workflows);
+                    await getWorkflowStore().setItem(WORKFLOW_STORE_KEY, workflows);
                     return;
                 }
-                const local = await workflowStore.getItem<CreativeWorkflow[]>(WORKFLOW_STORE_KEY);
+                const local = await getWorkflowStore().getItem<CreativeWorkflow[]>(WORKFLOW_STORE_KEY);
                 const seed = local?.length ? local.map(normalizeWorkflow) : createStarterWorkflows(effectiveConfig);
                 const saved = await Promise.all(seed.map((workflow) => saveUserWorkflow(token, workflowToRecord(normalizeWorkflow(workflow)))));
                 setWorkflows(saved.map(recordToWorkflow).sort((a, b) => b.updatedAt - a.updatedAt));
@@ -313,20 +355,20 @@ export function CreativeWorkflowWorkspace({
                 // Use local workflows when account sync is unavailable.
             }
         }
-        const stored = await workflowStore.getItem<CreativeWorkflow[]>(WORKFLOW_STORE_KEY);
+        const stored = await getWorkflowStore().getItem<CreativeWorkflow[]>(WORKFLOW_STORE_KEY);
         if (stored?.length) {
             setWorkflows(stored.map(normalizeWorkflow).sort((a, b) => b.updatedAt - a.updatedAt));
             return;
         }
         const seed = createStarterWorkflows(effectiveConfig);
         setWorkflows(seed);
-        await workflowStore.setItem(WORKFLOW_STORE_KEY, seed);
+        await getWorkflowStore().setItem(WORKFLOW_STORE_KEY, seed);
     };
 
     const saveWorkflows = async (items: CreativeWorkflow[]) => {
         const sorted = [...items].sort((a, b) => b.updatedAt - a.updatedAt);
         setWorkflows(sorted);
-        await workflowStore.setItem(WORKFLOW_STORE_KEY, sorted);
+        await getWorkflowStore().setItem(WORKFLOW_STORE_KEY, sorted);
     };
 
     const openRunner = (workflow: CreativeWorkflow) => {
@@ -336,7 +378,7 @@ export function CreativeWorkflowWorkspace({
         setWorkflowReferences([]);
         setSeriesDrafts([]);
         if (workflow.mode === "multi_image_series") {
-            void workflowStore.getItem<SeriesPromptDraft[]>(seriesDraftStorageKey(workflow.id)).then((drafts) => {
+            void getWorkflowStore().getItem<SeriesPromptDraft[]>(seriesDraftStorageKey(workflow.id)).then((drafts) => {
                 setSeriesDrafts((drafts || []).map(normalizeSeriesDraft));
                 seriesDraftsLoadedRef.current = true;
             });
@@ -723,7 +765,7 @@ export function CreativeWorkflowWorkspace({
     };
 
     const saveWorkflowTaskLog = async (log: ImageHistoryLog) => {
-        await imageLogStore.setItem(log.id, serializeHistoryLog(log));
+        await getWorkflowImageLogStore().setItem(log.id, serializeHistoryLog(log));
         if (token) await saveImageGenerationLogs(token, [serializeHistoryLog(log)]).catch(() => undefined);
     };
 
@@ -868,12 +910,12 @@ export function CreativeWorkflowWorkspace({
                 seriesTitle,
                 seriesIndex,
             });
-            await imageLogStore.setItem(log.id, serializeHistoryLog(log));
+            await getWorkflowImageLogStore().setItem(log.id, serializeHistoryLog(log));
             onGenerationLogSaved?.();
             const finishedAt = Date.now();
             setWorkflows((value) => {
                 const next = value.map((item) => (item.id === workflow.id ? { ...item, lastRunAt: finishedAt, updatedAt: finishedAt } : item)).sort((a, b) => b.updatedAt - a.updatedAt);
-                void workflowStore.setItem(WORKFLOW_STORE_KEY, next);
+                void getWorkflowStore().setItem(WORKFLOW_STORE_KEY, next);
                 return next;
             });
             if (token && workflowSyncEnabledRef.current && workflow.editable !== false) void saveUserWorkflow(token, workflowToRecord({ ...workflow, lastRunAt: finishedAt, updatedAt: finishedAt })).catch(() => {});
@@ -2096,11 +2138,11 @@ function buildImageHistoryLog({
 async function ensureWorkflowCategory(name: string) {
     const trimmed = name.trim();
     if (!trimmed) return null;
-    const categories = (await categoryStore.getItem<GenerationCategory[]>(CATEGORY_STORE_KEY)) || [];
+    const categories = (await getWorkflowCategoryStore().getItem<GenerationCategory[]>(CATEGORY_STORE_KEY)) || [];
     const existing = categories.find((item) => item.name === trimmed);
     if (existing) return existing;
     const nextCategory = { id: nanoid(), name: trimmed, createdAt: Date.now() };
-    await categoryStore.setItem(CATEGORY_STORE_KEY, [...categories, nextCategory]);
+    await getWorkflowCategoryStore().setItem(CATEGORY_STORE_KEY, [...categories, nextCategory]);
     return nextCategory;
 }
 

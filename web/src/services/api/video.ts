@@ -7,10 +7,12 @@ import { isGeminiVeo31Model, normalizeGeminiVideoDuration, normalizeGeminiVideoR
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { isKIEGrokVideoModel, isKIEKlingV3Config, kieKlingOmniVariant } from "@/components/video-settings-panel";
 import { isAgnesVideoV25Model, isCogVideoX3Model, modelKey, normalizeCogVideoX3Duration, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
-import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
+import { nanoid } from "nanoid";
+import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directAIProviderForConfig, localChannelForActiveModel, type AiConfig, type VideoElementReference } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { useWalletStore } from "@/stores/use-wallet-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -86,7 +88,10 @@ function aiHeaders(config: AiConfig) {
 }
 
 function refreshRemoteUser(config: AiConfig) {
-    if (usesAccountProxy(config)) void useUserStore.getState().hydrateUser();
+    if (usesAccountProxy(config)) {
+        void useUserStore.getState().hydrateUser();
+        void useWalletStore.getState().triggerWalletSync();
+    }
 }
 
 export type VideoReferenceInput = {
@@ -127,6 +132,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
             : unwrapVideoResponseForConfig(config, model, (await axios.post<ApiVideoResponse>(createUrl, requestBody, { headers })).data);
         if (!created.id && !created.video_id) throw new Error("视频接口没有返回任务 ID");
         if (typeof created.progress === "number") onProgress?.(created.progress, created);
+        refreshRemoteUser(config);
         return { task: created, pollId: videoPollId(model, created), startedAt, requestBody: body };
     } catch (error) {
         const { message, detail } = readAxiosError(error, "视频生成失败");
@@ -152,7 +158,8 @@ export async function pollCreatedVideoGenerationTask(config: AiConfig, task: Vid
     try {
         if (initialDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
         for (; ;) {
-            const video = await cacheProtectedGeminiVideo(config, model, await pollOnce());
+            const rawVideo = await pollOnce();
+            const video = await cacheProtectedVideoContent(config, model, await cacheProtectedGeminiVideo(config, model, rawVideo));
             onPoll?.(video);
             if (isFailedVideoStatus(video.status)) throw new VideoRequestError(video.error?.message || "视频生成失败", video);
             if (typeof video.progress === "number") onProgress?.(video.progress, video);
@@ -183,7 +190,7 @@ export async function pollVideoGenerationTaskStatus(config: AiConfig, task: Vide
     const result = directProvider
         ? await (await import("@/services/api/direct-ai")).pollDirectVideoTask(config, directProvider, pollId)
         : unwrapVideoResponseForConfig(config, model, (await axios.get<ApiVideoResponse>(aiVideoPollUrl(config, model, pollId), { headers: aiHeaders(config), params: usesAccountProxy(config) ? { model } : undefined })).data);
-    return cacheProtectedGeminiVideo(config, model, await cacheProtectedGrokVideo(config, model, result));
+    return cacheProtectedVideoContent(config, model, await cacheProtectedGeminiVideo(config, model, result));
 }
 
 export async function listVideoGenerationTasks(config: AiConfig) {
@@ -206,14 +213,57 @@ function isGrok2APIVideoConfig(config: AiConfig, model: string) {
     return (normalizedModel === "grok-imagine-video" || normalizedModel === "grok-imagine-video-1.5") && videoChannelProtocol(config, model) === "grok2api";
 }
 
-async function cacheProtectedGrokVideo(config: AiConfig, model: string, task: VideoResponse) {
+export function formatPlayableVideoUrl(url?: string, model = ""): string {
+    if (!url) return "";
+    if (url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("/api/files/")) return url;
+    const match = url.match(/\/videos\/([^/?#]+)\/content(?:[?#]|$)/i);
+    if (!match) return url;
+    const taskId = match[1];
+    const token = useUserStore.getState().token;
+    if (!token) return url;
+    const query = new URLSearchParams();
+    query.set("token", token);
+    if (model) query.set("model", model);
+    return `/api/v1/videos/${encodeURIComponent(taskId)}/content?${query.toString()}`;
+}
+
+async function cacheProtectedVideoContent(config: AiConfig, model: string, task: VideoResponse) {
     const url = task.video_url || task.url || "";
-    if (!isCompletedVideoStatus(task.status) || task.storageKey || !isGrok2APIVideoConfig(config, model) || !/\/v1\/videos\/[^/]+\/content(?:[?#]|$)/.test(url)) return task;
-    const taskId = task.task_id || task.id || task.video_id || "";
-    const response = await fetch(`${aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}/content`)}?model=${encodeURIComponent(model)}`, { headers: aiHeaders(config) });
-    if (!response.ok) throw new VideoRequestError(`视频内容下载失败：${response.status}`, task);
-    const media = await uploadMediaFile(await response.blob(), "generated-video");
-    return { ...task, url: media.url, video_url: media.url, storageKey: media.storageKey };
+    if (!isCompletedVideoStatus(task.status) || task.storageKey || !url) return task;
+    // 如果已经由服务端本地对象存储托管，则无需二次转存
+    if (url.startsWith("/api/files/")) return task;
+
+    try {
+        const taskIdMatch = url.match(/\/videos\/([^/?#]+)\/content/i);
+        const taskId = task.task_id || task.id || task.video_id || (taskIdMatch ? taskIdMatch[1] : "");
+        const effectiveModel = model || task.model || "";
+
+        let response: Response | null = null;
+        if (usesAccountProxy(config) && taskId) {
+            const fetchUrl = `${aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}/content`)}?model=${encodeURIComponent(effectiveModel)}`;
+            response = await fetch(fetchUrl, { headers: aiHeaders(config) }).catch(() => null);
+        }
+        if (!response || !response.ok) {
+            const channel = localChannelForActiveModel(config);
+            const authHeader = (channel?.apiKey ? { Authorization: `Bearer ${channel.apiKey}` } : (config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})) as HeadersInit;
+            response = await fetch(url, { headers: authHeader }).catch(() => null);
+        }
+        if (response && response.ok) {
+            const blob = await response.blob();
+            // 优先转存到服务端持久化存储（WebDAV/S3），失败则 LocalForage 兜底
+            try {
+                const { uploadAssetMediaFile } = await import("@/services/file-storage");
+                const serverMedia = await uploadAssetMediaFile(new File([blob], `video-${taskId || nanoid()}.mp4`, { type: blob.type || "video/mp4" }));
+                return { ...task, url: serverMedia.url, video_url: serverMedia.url, storageKey: serverMedia.storageKey, task_id: taskId || task.task_id, id: taskId || task.id };
+            } catch {
+                const media = await uploadMediaFile(blob, "generated-video");
+                return { ...task, url: media.url, video_url: media.url, storageKey: media.storageKey, task_id: taskId || task.task_id, id: taskId || task.id };
+            }
+        }
+    } catch (err) {
+        console.warn("转存视频内容出错:", err);
+    }
+    return task;
 }
 
 async function createGrok2APIVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {

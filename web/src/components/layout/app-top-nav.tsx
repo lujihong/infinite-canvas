@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { AppConfigModal } from "@/components/layout/app-config-modal";
+import { BrandLogo } from "@/components/layout/brand-logo";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { cn } from "@/lib/utils";
@@ -22,20 +23,16 @@ export function AppTopNav() {
         <>
             {!hideHeader ? (
                 <header className="sticky top-0 z-20 h-16 shrink-0 border-b border-stone-200 bg-background/90 backdrop-blur-xl dark:border-stone-800">
-                    <div className="mx-auto flex h-full max-w-7xl items-stretch justify-between gap-5 px-6">
-                        <div className="flex min-w-0 items-center">
-                            <Link href="/" className="flex h-full shrink-0 items-center gap-2.5 text-sm font-semibold leading-none tracking-tight text-stone-950 transition hover:text-stone-600 dark:text-stone-100 dark:hover:text-stone-300">
-                                <img
-                                    src="/logo-square.png"
-                                    alt="新元宝视频工作台"
-                                    className="size-7 shrink-0 object-contain rounded-md"
-                                />
-                                <span className="text-base font-semibold tracking-tight">新元宝视频工作台</span>
+                    <div className="mx-auto flex h-full w-full max-w-[1760px] items-stretch justify-between gap-3 px-4 sm:px-6 lg:gap-8">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <Link href="/" className="group flex h-full shrink-0 items-center gap-2.5 text-sm font-semibold leading-none tracking-tight text-stone-950 transition hover:opacity-90 dark:text-stone-100">
+                                <BrandLogo className="h-8 w-auto max-w-[96px] transition-transform duration-300 group-hover:scale-105" alt="鑫元宝视频创作工作台" />
+                                <span className="text-base font-bold tracking-tight whitespace-nowrap">鑫元宝视频创作工作台</span>
                             </Link>
 
                             <button
                                 type="button"
-                                className="ml-3 inline-flex size-8 shrink-0 items-center justify-center text-stone-600 transition hover:text-stone-950 md:hidden dark:text-stone-300 dark:hover:text-white"
+                                className="ml-2 inline-flex size-8 shrink-0 items-center justify-center text-stone-600 transition hover:text-stone-950 md:hidden dark:text-stone-300 dark:hover:text-white"
                                 onClick={() => setMobileNavOpen(true)}
                                 aria-label="打开导航菜单"
                                 title="导航菜单"
@@ -43,7 +40,7 @@ export function AppTopNav() {
                                 <Menu className="size-5" />
                             </button>
 
-                            <nav className="hide-scrollbar ml-8 hidden h-16 min-w-0 items-center gap-7 overflow-x-auto md:flex">
+                            <nav className="hide-scrollbar ml-4 hidden h-16 shrink-0 items-center gap-4 md:flex lg:ml-6 lg:gap-6">
                                 {navigationTools.map((tool) => {
                                     const Icon = tool.icon;
                                     const active = tool.slug === activeToolSlug;
@@ -52,21 +49,21 @@ export function AppTopNav() {
                                             key={tool.slug}
                                             href={`/${tool.slug}`}
                                             className={cn(
-                                                "relative flex h-16 shrink-0 items-center gap-2 text-sm leading-6 transition after:absolute after:inset-x-0 after:bottom-0 after:h-px",
+                                                "relative flex h-16 shrink-0 items-center gap-1.5 text-sm leading-6 transition whitespace-nowrap after:absolute after:inset-x-0 after:bottom-0 after:h-px",
                                                 active
                                                     ? "font-medium text-stone-950 after:bg-stone-950 dark:text-stone-100 dark:after:bg-stone-100"
                                                     : "text-stone-500 after:bg-transparent hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100",
                                             )}
                                         >
                                             <Icon className="size-4" />
-                                            <span className="truncate">{tool.label}</span>
+                                            <span>{tool.label}</span>
                                         </Link>
                                     );
                                 })}
                             </nav>
                         </div>
 
-                        <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap">
+                        <div className="my-auto flex h-9 shrink-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap pl-2">
                             <UserStatusActions />
                         </div>
                     </div>

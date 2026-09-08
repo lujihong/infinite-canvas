@@ -16,7 +16,16 @@ type loginRequest struct {
 }
 
 type registerRequest struct {
-	Username string `json:"username"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+	Email            string `json:"email"`
+	VerificationCode string `json:"verification_code"`
+	Code             string `json:"code"`
+}
+
+type passwordResetRequest struct {
+	Email    string `json:"email"`
+	Token    string `json:"token"`
 	Password string `json:"password"`
 }
 
@@ -34,9 +43,77 @@ type adjustUserCreditsRequest struct {
 	Credits int `json:"credits"`
 }
 
+func SendEmailVerification(w http.ResponseWriter, r *http.Request) {
+	email := strings.TrimSpace(r.URL.Query().Get("email"))
+	if email == "" {
+		Fail(w, "请输入有效的邮箱地址")
+		return
+	}
+	err := service.SendNewAPIVerificationEmail(email)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, true)
+}
+
+func SendPasswordResetEmail(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		email = strings.TrimSpace(r.URL.Query().Get("email"))
+	}
+	if email == "" {
+		Fail(w, "请输入有效的邮箱地址")
+		return
+	}
+	err := service.SendNewAPIPasswordResetEmail(email)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, true)
+}
+
+func ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req passwordResetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		Fail(w, "参数无效")
+		return
+	}
+	if req.Email == "" || req.Token == "" || req.Password == "" {
+		Fail(w, "邮箱、重置码和新密码不能为空")
+		return
+	}
+	err := service.ResetNewAPIPassword(req.Email, req.Token, req.Password)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, true)
+}
+
 func Register(w http.ResponseWriter, r *http.Request) {
 	var request registerRequest
 	_ = json.NewDecoder(r.Body).Decode(&request)
+	code := request.VerificationCode
+	if code == "" {
+		code = request.Code
+	}
+
+	if request.Email != "" && code != "" {
+		session, err := service.RegisterThroughNewAPI(request.Username, request.Password, request.Email, code)
+		if err != nil {
+			FailError(w, err)
+			return
+		}
+		OK(w, session)
+		return
+	}
+
 	session, err := service.Register(request.Username, request.Password)
 	if err != nil {
 		FailError(w, err)
@@ -48,7 +125,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 func Login(w http.ResponseWriter, r *http.Request) {
 	var request loginRequest
 	_ = json.NewDecoder(r.Body).Decode(&request)
-	session, err := service.Login(request.Username, request.Password)
+	session, err := service.LoginThroughNewAPI(request.Username, request.Password)
 	if err != nil {
 		FailError(w, err)
 		return

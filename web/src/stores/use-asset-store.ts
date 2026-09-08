@@ -39,9 +39,14 @@ type AssetStore = {
     syncAccountAssets: (token: string) => Promise<void>;
     stopAccountAssetSync: () => void;
     cleanupImages: (extra?: unknown) => void;
+    reset: () => void;
 };
 
 const ASSET_STORE_KEY = "infinite-canvas:asset_store";
+function getScopedAssetStorageKey(name: string) {
+    const user = useUserStore.getState().user;
+    return `${name}:${user?.id || "guest"}`;
+}
 let activeAssetSyncToken = "";
 let accountAssetSyncEnabled = false;
 let isHydratingAccountAssets = false;
@@ -66,14 +71,15 @@ async function resolveStoredAsset(asset: Asset): Promise<Asset> {
 
 const assetStorage: PersistStorage<AssetStore> = {
     getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
+        const scopedKey = getScopedAssetStorageKey(name);
+        const value = await localForageStorage.getItem(scopedKey);
         if (!value) return null;
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
         parsed.state.assets = await Promise.all(parsed.state.assets.map(resolveStoredAsset));
         return parsed;
     },
-    setItem: (name, value) => localForageStorage.setItem(name, JSON.stringify(value)),
-    removeItem: (name) => localForageStorage.removeItem(name),
+    setItem: (name, value) => localForageStorage.setItem(getScopedAssetStorageKey(name), JSON.stringify(value)),
+    removeItem: (name) => localForageStorage.removeItem(getScopedAssetStorageKey(name)),
 };
 
 export const useAssetStore = create<AssetStore>()(
@@ -204,6 +210,12 @@ export const useAssetStore = create<AssetStore>()(
                 activeAssetSyncToken = "";
                 if (syncTimer) window.clearTimeout(syncTimer);
                 syncTimer = null;
+            },
+            reset: () => {
+                activeAssetSyncToken = "";
+                if (syncTimer) window.clearTimeout(syncTimer);
+                syncTimer = null;
+                set({ assets: [] });
             },
             cleanupImages: (extra) => {
                 window.setTimeout(async () => {

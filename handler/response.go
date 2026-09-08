@@ -34,12 +34,15 @@ func writeJSONWithStatus(w http.ResponseWriter, status int, value any) {
 }
 
 func FailError(w http.ResponseWriter, err error) {
+	if err == nil {
+		return
+	}
 	log.Printf("request failed: %v", err)
 	if safe, ok := err.(interface{ SafeMessage() string }); ok {
 		Fail(w, safe.SafeMessage())
 		return
 	}
-	Fail(w, "操作失败")
+	Fail(w, err.Error())
 }
 
 func writeJSON(w http.ResponseWriter, value any) {
