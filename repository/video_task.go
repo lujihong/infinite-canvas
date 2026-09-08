@@ -95,3 +95,21 @@ func DeleteFinishedVideoTasksBefore(before string) error {
 		Where("status IN ?", []string{"completed", "failed", "cancelled", "canceled"}).
 		Delete(&model.VideoTask{}).Error
 }
+
+// ListRecentUserVideoTasks 查询当前用户近期所有视频任务（包含排队、进行中与已完成）
+func ListRecentUserVideoTasks(userID string, limit int) ([]model.VideoTask, error) {
+	db, err := DB()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	var tasks []model.VideoTask
+	err = db.Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&tasks).Error
+	return tasks, err
+}
+

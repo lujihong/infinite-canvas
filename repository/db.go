@@ -80,9 +80,10 @@ func DB() (*gorm.DB, error) {
 			&model.VideoGenerationLog{},
 			&model.ImageGenerationLog{},
 			&model.CanvasImageTask{},
-			&model.CanvasAudioTask{},
-			&model.CanvasProject{},
-		)
+				&model.CanvasAudioTask{},
+				&model.CanvasProject{},
+				&model.RechargeOrder{},
+			)
 	})
 	return db, dbErr
 }

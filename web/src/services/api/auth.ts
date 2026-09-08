@@ -80,8 +80,17 @@ export async function checkRechargeStatus(tradeNo: string, token?: string) {
 export type ConsumptionLogItem = {
     id: number;
     created_at: number;
+    submit_time?: number;
+    complete_time?: number;
     model_name: string;
     type: number;
+    status?: "success" | "failed" | "refunded" | "processing" | "free";
+    status_label?: string;
+    progress?: number;
+    duration_seconds?: number;
+    task_id?: string;
+    task_action?: string;
+    video_url?: string;
     quota: number;
     points_cost: number;
     formatted_points: string;
@@ -91,8 +100,10 @@ export type ConsumptionLogItem = {
     completion_tokens: number;
     use_time: number;
     is_stream: boolean;
-    task_id?: string;
-    video_url?: string;
+    error_message?: string;
+    error_detail?: string;
+    request_id?: string;
+    upstream_request_id?: string;
 };
 
 export async function fetchUserConsumptionLogs(token: string) {
