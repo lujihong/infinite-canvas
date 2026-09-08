@@ -354,7 +354,7 @@ func autoConfigureUserOfficialChannel(userID string, tokenKey string) error {
 	return err
 }
 
-// GetUserExclusiveNewAPIToken 读取用户绑定的专属 New-API Token
+// GetUserExclusiveNewAPIToken 读取用户绑定的专属 New-API Token（严格多用户隔离）
 func GetUserExclusiveNewAPIToken(userID string) string {
 	user, ok, err := repository.GetUserByID(userID)
 	if err != nil || !ok {
@@ -366,15 +366,18 @@ func GetUserExclusiveNewAPIToken(userID string) string {
 		return extra.NewAPIToken
 	}
 
-	config, ok, err := repository.GetUserConfig(userID)
-	if err == nil && ok && config.ModelConfig != "" {
-		var parsed struct {
-			LocalChannels []struct {
-				APIKey string `json:"apiKey"`
-			} `json:"localChannels"`
-		}
-		if json.Unmarshal([]byte(config.ModelConfig), &parsed) == nil && len(parsed.LocalChannels) > 0 {
-			return parsed.LocalChannels[0].APIKey
+	// 仅限管理员账号在未绑定 Extra 时允许回退读取自身的自定义配置，普通用户严格物理隔离防串号
+	if user.Role == model.UserRoleAdmin {
+		config, ok, err := repository.GetUserConfig(userID)
+		if err == nil && ok && config.ModelConfig != "" {
+			var parsed struct {
+				LocalChannels []struct {
+					APIKey string `json:"apiKey"`
+				} `json:"localChannels"`
+			}
+			if json.Unmarshal([]byte(config.ModelConfig), &parsed) == nil && len(parsed.LocalChannels) > 0 {
+				return parsed.LocalChannels[0].APIKey
+			}
 		}
 	}
 
@@ -957,29 +960,11 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 			strings.Contains(lowerModel, "minimax-h3") ||
 			strings.Contains(lowerModel, "happyhouse")
 
-		// 检查本地关联任务
+		// 检查本地关联任务（严格按任务ID精确对应，严禁时间模糊匹配防串号）
 		var localMatched *model.VideoTask
 		if taskID != "" {
 			if t, exists := localTaskByUpstreamID[taskID]; exists {
 				localMatched = &t
-			}
-		}
-		if localMatched == nil && isVideo {
-			// 若没拿到 task_id，尝试按创建时间和模型寻找本地任务
-			for _, lt := range localTasks {
-				if lt.Model == l.ModelName {
-					var subTime int64
-					if t, err := time.Parse(time.RFC3339, lt.CreatedAt); err == nil {
-						subTime = t.Unix()
-					}
-					if subTime > 0 && (subTime-l.CreatedAt >= -180 && subTime-l.CreatedAt <= 180) {
-						localMatched = &lt
-						if taskID == "" {
-							taskID = lt.UpstreamTaskID
-						}
-						break
-					}
-				}
 			}
 		}
 
@@ -1252,13 +1237,22 @@ func CreateWeChatRechargeOrder(userID string, amount int) (map[string]any, error
 					}
 					if json.NewDecoder(qResp.Body).Decode(&qData) == nil && qData.Success && qData.Data.UserID > 0 {
 						newApiUID = qData.Data.UserID
+						// 自动回写至用户 Extra，免除后续重复查询
+						if u, uOk, _ := repository.GetUserByID(userID); uOk {
+							var ex UserExtraInfo
+							_ = json.Unmarshal([]byte(u.Extra), &ex)
+							ex.NewAPIUserID = newApiUID
+							exBytes, _ := json.Marshal(ex)
+							u.Extra = string(exBytes)
+							_, _ = repository.SaveUser(u)
+						}
 					}
 				}
 			}
 		}
 	}
 	if newApiUID <= 0 {
-		newApiUID = 1
+		return nil, errors.New("未能识别您的专属中转站账户，请重新登录后再发起充值")
 	}
 
 	tradeNo := fmt.Sprintf("USR%dNO%s%d", newApiUID, uuid.NewString()[:6], time.Now().Unix())

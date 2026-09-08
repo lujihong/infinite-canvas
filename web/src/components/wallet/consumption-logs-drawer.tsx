@@ -49,10 +49,11 @@ export function ConsumptionLogsDrawer({
     onOpenRecharge
 }: ConsumptionLogsDrawerProps) {
     const token = useUserStore((state) => state.token);
+    const user = useUserStore((state) => state.user);
     const wallet = useWalletStore((state) => state.wallet);
     const [mainTab, setMainTab] = useState<"consumption" | "recharge">("consumption");
 
-    // 消费记录状态
+    // 消费记录状态（严格单用户隔离）
     const [logs, setLogs] = useState<ConsumptionLogItem[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
     const [keyword, setKeyword] = useState("");
@@ -61,7 +62,7 @@ export function ConsumptionLogsDrawer({
     const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
     const [selectedDetailLog, setSelectedDetailLog] = useState<ConsumptionLogItem | null>(null);
 
-    // 充值记录状态
+    // 充值记录状态（严格单用户隔离）
     const [rechargeLogs, setRechargeLogs] = useState<RechargeLogItem[]>([]);
     const [loadingRecharge, setLoadingRecharge] = useState(false);
     const [checkingTradeNo, setCheckingTradeNo] = useState<string | null>(null);
@@ -73,7 +74,7 @@ export function ConsumptionLogsDrawer({
             const data = await fetchUserConsumptionLogs(token);
             setLogs(Array.isArray(data) ? data : []);
         } catch {
-            // ignore
+            setLogs([]);
         } finally {
             setLoadingLogs(false);
         }
@@ -86,7 +87,7 @@ export function ConsumptionLogsDrawer({
             const data = await fetchUserRechargeLogs(token);
             setRechargeLogs(Array.isArray(data) ? data : []);
         } catch {
-            // ignore
+            setRechargeLogs([]);
         } finally {
             setLoadingRecharge(false);
         }
@@ -120,13 +121,21 @@ export function ConsumptionLogsDrawer({
 
     useEffect(() => {
         if (open) {
+            // 打开时或切换用户时，先清空上一个用户的残留数据，防止串号闪烁
+            setLogs([]);
+            setRechargeLogs([]);
+            setKeyword("");
+            setSelectedDetailLog(null);
             if (initialTab) {
                 setMainTab(initialTab);
             }
             void loadConsumptionLogs();
             void loadRechargeLogs();
+        } else {
+            setLogs([]);
+            setRechargeLogs([]);
         }
-    }, [open, initialTab, token]);
+    }, [open, initialTab, token, user?.id]);
 
     // 消费分类、状态与关键词过滤
     const filteredLogs = useMemo(() => {
@@ -211,7 +220,7 @@ export function ConsumptionLogsDrawer({
                                 任务日志与充值明细中心
                             </div>
                             <div className="text-xs font-normal text-stone-400 dark:text-stone-500">
-                                官方直连中转底座 · 100% 物理真实账本流水
+                                当前账户: <span className="font-medium text-stone-600 dark:text-stone-300">{user?.displayName || user?.username || "用户"}</span> · 官方直连物理独立账本
                             </div>
                         </div>
                     </div>
