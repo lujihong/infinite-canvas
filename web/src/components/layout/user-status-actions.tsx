@@ -70,8 +70,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
         ...(user ? [
             { key: "recharge", icon: <Zap className="size-4 text-amber-500" />, label: "算力充值", onClick: openRechargeModal },
             { key: "preferences", icon: <Settings2 className="size-4 text-stone-500" />, label: "偏好设置", onClick: () => openConfigDialog(false) },
-            { key: "logs", icon: <Receipt className="size-4 text-sky-500" />, label: "扣费流水", onClick: () => { setLogsTab("consumption"); setLogsOpen(true); } },
-            { key: "recharge-logs", icon: <CreditCard className="size-4 text-emerald-500" />, label: "充值记录", onClick: () => { setLogsTab("recharge"); setLogsOpen(true); } },
+            { key: "logs", icon: <Receipt className="size-4 text-sky-500" />, label: "流水明细", onClick: () => { setLogsTab("consumption"); setLogsOpen(true); } },
         ] : []),
         ...(user?.role === "admin" ? [{ key: "admin", icon: <Shield className="size-4" />, label: <Link href="/admin">管理后台</Link> }] : []),
         ...(onOpenShortcuts ? [{ key: "shortcuts", icon: <Keyboard className="size-4" />, label: "快捷键", onClick: onOpenShortcuts }] : []),

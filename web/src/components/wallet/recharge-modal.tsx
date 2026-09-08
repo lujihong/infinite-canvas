@@ -159,50 +159,38 @@ export function RechargeModal({
             }}
         >
             <div className="space-y-3.5">
-                {/* 标题栏 */}
-                <div className="flex items-center justify-between pb-3 border-b border-stone-200/80 dark:border-stone-800/80">
-                    <div className="flex items-center gap-2">
-                        <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                            <Zap className="size-4" />
+                    {/* 标题栏 */}
+                    <div className="flex items-center justify-between pb-3 border-b border-stone-200/80 dark:border-stone-800/80">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="flex size-9 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
+                                <Zap className="size-5" />
+                            </div>
+                            <div className="min-w-0">
+                                <h2 className="text-base font-bold tracking-tight text-stone-950 dark:text-stone-100 truncate">
+                                    算力充值中心
+                                </h2>
+                                <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                                    官方直连通道 · 实时汇率 1元 = {exchangeRate}积分
+                                </p>
+                            </div>
                         </div>
-                        <div>
-                            <h2 className="text-base font-bold tracking-tight text-stone-950 dark:text-stone-100">
-                                算力充值中心
-                            </h2>
-                            <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                                官方直连通道 · 实时汇率 1元 = {exchangeRate}积分 · 两端秒级互通
-                            </p>
-                        </div>
+                        {onOpenLogs ? (
+                            <div className="mr-6 shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        onClose();
+                                        onOpenLogs("recharge");
+                                    }}
+                                    className="inline-flex cursor-pointer select-none items-center gap-1.5 rounded-lg border border-stone-200/90 bg-stone-100/80 px-2.5 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-200/80 hover:text-stone-950 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-200 dark:hover:bg-stone-700 transition"
+                                    title="查看充值与消费明细"
+                                >
+                                    <Receipt className="size-3.5 text-amber-500" />
+                                    <span>流水明细</span>
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
-                    {onOpenLogs ? (
-                        <div className="flex items-center gap-1.5">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    onClose();
-                                    onOpenLogs("recharge");
-                                }}
-                                className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-50/70 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 transition"
-                                title="查看在线充值记录"
-                            >
-                                <CreditCard className="size-3 text-emerald-600 dark:text-emerald-400" />
-                                <span>充值记录</span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    onClose();
-                                    onOpenLogs("consumption");
-                                }}
-                                className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-stone-200/80 bg-stone-50 px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:border-stone-700 dark:bg-stone-800/60 dark:text-stone-300 dark:hover:bg-stone-700 transition"
-                                title="查看任务扣费流水明细"
-                            >
-                                <Receipt className="size-3 text-sky-500" />
-                                <span>消费明细</span>
-                            </button>
-                        </div>
-                    ) : null}
-                </div>
 
                 {/* 余额状态轻量展示条 */}
                 <div className="flex items-center justify-between rounded-xl border border-stone-200/70 bg-gradient-to-r from-stone-50 to-stone-100/60 px-3.5 py-2.5 dark:border-stone-800/70 dark:from-stone-900/90 dark:to-stone-950/80">
