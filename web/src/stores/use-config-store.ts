@@ -237,7 +237,7 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
     const fallbackModel = validDefault(modelChannel.defaultModel, textModels) || fallbackTextModel;
     const fallbackImageModel = validDefault(modelChannel.defaultImageModel, imageModels) || preferredModel(imageModels, isImageModelName);
     const fallbackVideoModel = validDefault(modelChannel.defaultVideoModel, videoModels) || preferredModel(videoModels, isVideoModelName);
-    const fallbackAudioModel = preferredModel(audioModels, isAudioModelName);
+    const fallbackAudioModel = preferredModel(audioModels, isAudioModelName) || config.audioModel || defaultConfig.audioModel;
     return {
         ...config,
         channelMode,
@@ -250,7 +250,9 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
         imageModel: imageModels.includes(config.imageModel) ? config.imageModel : fallbackImageModel,
         videoModel: videoModels.includes(config.videoModel) ? config.videoModel : fallbackVideoModel,
         textModel: textModels.includes(config.textModel) ? config.textModel : fallbackTextModel || fallbackModel,
-        audioModel: audioModels.includes(config.audioModel) ? config.audioModel : fallbackAudioModel,
+        audioModel: audioModels.length > 0
+            ? (audioModels.includes(config.audioModel) ? config.audioModel : fallbackAudioModel)
+            : (config.audioModel || fallbackAudioModel),
         systemPrompt: modelChannel.systemPrompt,
         publicChannels: modelChannel.channels || [],
     };

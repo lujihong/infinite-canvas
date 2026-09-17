@@ -5,6 +5,7 @@ import { AutoComplete, Input, Typography } from "antd";
 import { Check, ChevronDown, Cpu, Sparkles, Zap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { RECOMMENDED_AUDIO_MODELS } from "@/lib/audio-generation";
 import { getModelPricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
 import {
     filterModelsByCapability,
@@ -127,7 +128,16 @@ export function ConfigModelInput({
         const matched = allModels.filter(
             (item) => filterModelsByCapability([item.model], capability, item.protocol || "").length > 0
         );
-        return matched.length > 0 ? matched : allModels;
+        if (matched.length > 0) return matched;
+        if (capability === "audio") {
+            return RECOMMENDED_AUDIO_MODELS.map((modelName) => ({
+                channelId: "recommended-audio",
+                channelName: "常用语音合成/TTS",
+                protocol: "openai",
+                model: modelName,
+            }));
+        }
+        return [];
     }, [allModels, capability]);
 
     // 智能构建 AutoComplete 下拉选项（两行优雅排版，自动换行）
@@ -149,13 +159,14 @@ export function ConfigModelInput({
             }
         }
 
-        const result = matched.map((item) => {
+        const result: Array<{ value: string; label: React.ReactNode; disabled?: boolean }> = matched.map((item) => {
             const pricing = getModelPricing(item.model);
             const isSelected = (value || "").trim().toLowerCase() === item.model.toLowerCase();
+            const isRecommendedAudio = item.channelId === "recommended-audio";
             return {
                 value: item.model,
                 label: (
-                    <div title={pricing ? personalPricingDetails(pricing) : personalPricing.error || "登录后查看本人报价"} className={cn(
+                    <div title={pricing ? personalPricingDetails(pricing) : personalPricing.error || (isRecommendedAudio ? "常用音频/TTS参考模型" : "登录后查看本人报价")} className={cn(
                         "flex flex-col gap-1 py-1.5 px-1 text-xs border-b border-stone-100/60 dark:border-stone-800/60 last:border-b-0 rounded transition-colors",
                         isSelected && "bg-stone-100/60 dark:bg-stone-800/50"
                     )}>
@@ -174,12 +185,18 @@ export function ConfigModelInput({
                                     <Check className="size-2.5 stroke-[3]" />
                                     当前
                                 </span>
+                            ) : isRecommendedAudio ? (
+                                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 text-[10px] font-bold text-sky-600 dark:text-sky-400">
+                                    推荐语音
+                                </span>
                             ) : null}
                         </div>
                         {/* 第二行：单价/积分标签 + 渠道信息（字号稍小、浅灰色次级展示） */}
                         <div className="flex items-center justify-between gap-2 pl-5 text-[11px] text-stone-400 dark:text-stone-500">
                             <span className="truncate">
-                                {pricing ? (
+                                {isRecommendedAudio ? (
+                                    <span>通用标准语音模型 · 支持直接调用或自定义通道</span>
+                                ) : pricing ? (
                                     <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-mono font-medium">
                                         <Zap className="size-3 fill-current" />
                                         {pricing.formatted_points_cost}
@@ -188,7 +205,7 @@ export function ConfigModelInput({
                                     <span>{personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
                                 )}
                             </span>
-                            {pricing && item.channelName ? (
+                            {item.channelName ? (
                                 <span className="shrink-0 text-[10px] opacity-75">
                                     {item.channelName}
                                 </span>
@@ -200,6 +217,18 @@ export function ConfigModelInput({
                 ),
             };
         });
+
+        if (matched.length === 0 && !query) {
+            result.push({
+                value: "",
+                disabled: true,
+                label: (
+                    <div className="py-2.5 px-2 text-center text-xs text-stone-400">
+                        当前通道暂无对应模型，请在上方输入自定义模型名称
+                    </div>
+                ),
+            });
+        }
 
         // 如果用户主动输入了新关键词且不在匹配列表中，提供“使用自定义模型”快捷选项
         const exactMatch = filteredModels.some((item) => item.model.toLowerCase() === query);

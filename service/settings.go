@@ -24,10 +24,54 @@ func PublicSettings() (model.PublicSetting, error) {
 	settings, err := repository.GetSettings()
 	settings = normalizeSettings(settings)
 	settings.Public.ModelChannel.Channels = publicChannelInfos(settings.Private.Channels)
+	syncOfficialNewAPIModels(&settings)
 	if len(settings.Public.ModelChannel.AvailableModels) == 0 {
 		settings.Public.ModelChannel.AvailableModels = enabledChannelModels(settings.Private.Channels)
 	}
 	return settings.Public, err
+}
+
+func syncOfficialNewAPIModels(settings *model.Settings) {
+	if settings == nil {
+		return
+	}
+	pricingItems, err := FetchModelPricingList()
+	if err != nil || len(pricingItems) == 0 {
+		return
+	}
+
+	activeModels := make([]string, 0, len(pricingItems))
+	activeSet := make(map[string]bool, len(pricingItems))
+	for _, item := range pricingItems {
+		name := strings.TrimSpace(item.ModelName)
+		if name != "" && !activeSet[name] {
+			activeSet[name] = true
+			activeModels = append(activeModels, name)
+		}
+	}
+	if len(activeModels) == 0 {
+		return
+	}
+
+	// 动态对齐公共可用模型列表与官方渠道模型列表，杜绝已下线/已禁用渠道残留（如 MiniMax-H3）
+	settings.Public.ModelChannel.AvailableModels = activeModels
+	for i := range settings.Public.ModelChannel.Channels {
+		ch := &settings.Public.ModelChannel.Channels[i]
+		if isOfficialNewAPIChannel(ch.BaseURL, ch.ID) {
+			ch.Models = activeModels
+		}
+	}
+	for i := range settings.Private.Channels {
+		ch := &settings.Private.Channels[i]
+		if isOfficialNewAPIChannel(ch.BaseURL, ch.ID) {
+			ch.Models = activeModels
+		}
+	}
+}
+
+func isOfficialNewAPIChannel(baseURL, id string) bool {
+	base := strings.ToLower(baseURL)
+	return strings.Contains(base, "xybcloud.com") || id == "channel-xyb" || id == "xyb-official-exclusive"
 }
 
 func UserCanUseRemoteModelChannel(user model.AuthUser) bool {
@@ -40,6 +84,7 @@ func UserCanUseRemoteModelChannel(user model.AuthUser) bool {
 
 func AdminSettings() (model.Settings, error) {
 	settings, err := repository.GetSettings()
+	syncOfficialNewAPIModels(&settings)
 	return hidePrivateAPIKeys(normalizeSettings(settings)), err
 }
 

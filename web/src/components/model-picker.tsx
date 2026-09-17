@@ -5,6 +5,7 @@ import { Check, ChevronDown, Cpu, Plus, Search, Sparkles } from "lucide-react";
 import { Popover } from "antd";
 
 import { cn } from "@/lib/utils";
+import { RECOMMENDED_AUDIO_MODELS } from "@/lib/audio-generation";
 import { getModelPricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
 import {
     filterModelsByCapability,
@@ -145,8 +146,17 @@ export function ModelPicker({
         const matched = allOptions.filter(
             (item) => filterModelsByCapability([item.model], capability, item.protocol || "").length > 0
         );
-        // 如果过滤后为空，智能降级展示全部模型，不给用户呈现死胡同
-        return matched.length > 0 ? matched : allOptions;
+        if (matched.length > 0) return matched;
+        if (capability === "audio") {
+            return RECOMMENDED_AUDIO_MODELS.map((modelName) => ({
+                key: `recommended-audio::${modelName}`,
+                channelId: "recommended-audio",
+                channelName: "常用语音合成/TTS",
+                protocol: "openai",
+                model: modelName,
+            }));
+        }
+        return [];
     }, [allOptions, capability]);
 
     // 当前选中的选项信息

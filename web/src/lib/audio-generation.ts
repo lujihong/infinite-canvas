@@ -97,3 +97,11 @@ export function audioMimeType(format: string) {
     if (format === "pcm") return "audio/pcm";
     return "audio/mpeg";
 }
+
+export const RECOMMENDED_AUDIO_MODELS = [
+    "gpt-4o-mini-tts",
+    "tts-1",
+    "tts-1-hd",
+    "glm-tts",
+];
+
