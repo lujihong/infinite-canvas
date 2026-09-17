@@ -38,6 +38,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
             body: hasBody ? request.body : undefined,
             duplex: hasBody ? "half" : undefined,
             redirect: "manual",
+            signal: request.signal,
         } as RequestInit & { duplex?: "half" });
 
         return new Response(response.body, {

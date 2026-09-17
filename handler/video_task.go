@@ -72,6 +72,23 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		failAIChannelSelect(w, err, "AI 接口请求失败")
 		return
 	}
+	hasAICC, referenceErr := hasAICCVideoReference(body, contentType)
+	if referenceErr != nil {
+		FailWithStatus(w, http.StatusBadRequest, "视频参考素材格式无效")
+		return
+	}
+	if hasAICC {
+		if !strings.Contains(strings.ToLower(modelName), "seedance") {
+			FailWithStatus(w, http.StatusBadRequest, "人物素材仅支持 Seedance 视频模型")
+			return
+		}
+		channel, err = service.AICCVideoChannel(user.ID)
+		if err != nil {
+			FailWithStatus(w, http.StatusForbidden, err.Error())
+			return
+		}
+		userChannelID = "xyb-official-exclusive"
+	}
 	credits := 0
 	if userChannelID == "" {
 		credits, err = service.ModelCost(modelName)

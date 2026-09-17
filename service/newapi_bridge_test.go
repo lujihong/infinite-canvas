@@ -39,7 +39,7 @@ func TestParseErrorMessage(t *testing.T) {
 			name:        "refund with reason",
 			content:     "",
 			other:       `{"reason":"The request failed because the output video may be related to copyright restrictions."}`,
-			expectedMsg: "因生成内容触发版权安全策略，任务已终止并全额退款",
+			expectedMsg: "生成内容触发版权安全策略，费用状态请查看扣费与退款记录",
 		},
 	}
 

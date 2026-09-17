@@ -221,9 +221,9 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
     const { imageToDataUrl } = await import("@/services/image-storage");
     return {
         ...context,
-        referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))),
-        firstFrame: context.firstFrame ? { ...context.firstFrame, dataUrl: await imageToDataUrl(context.firstFrame) } : null,
-        lastFrame: context.lastFrame ? { ...context.lastFrame, dataUrl: await imageToDataUrl(context.lastFrame) } : null,
+        referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: image.aiccUri ? image.dataUrl : await imageToDataUrl(image) }))),
+        firstFrame: context.firstFrame ? { ...context.firstFrame, dataUrl: context.firstFrame.aiccUri ? context.firstFrame.dataUrl : await imageToDataUrl(context.firstFrame) } : null,
+        lastFrame: context.lastFrame ? { ...context.lastFrame, dataUrl: context.lastFrame.aiccUri ? context.lastFrame.dataUrl : await imageToDataUrl(context.lastFrame) } : null,
     };
 }
 
@@ -240,13 +240,14 @@ function generationLabel(type: NodeGenerationInput["type"], index: number) {
 }
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
-    if (!isCanvasImageNodeType(node.type) || !node.metadata?.content) return null;
+    if (!isCanvasImageNodeType(node.type) || !(node.metadata?.content || node.metadata?.aiccUri)) return null;
     return {
         id: node.id,
         name: `image-${node.id}.png`,
         type: node.metadata.mimeType || "image/png",
-        dataUrl: node.metadata.content,
+        dataUrl: node.metadata?.content || "",
         storageKey: node.metadata.storageKey,
+        aiccUri: node.metadata.aiccUri,
     };
 }
 
@@ -259,13 +260,14 @@ function readFrameReferences(node: CanvasNodeData | undefined, inputs: NodeGener
 }
 
 function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
-    if (node.type !== CanvasNodeType.Video || !node.metadata?.content) return null;
+    if (node.type !== CanvasNodeType.Video || !(node.metadata?.content || node.metadata?.aiccUri)) return null;
     return {
         id: node.id,
         name: `video-${node.id}.mp4`,
         type: node.metadata.mimeType || "video/mp4",
-        url: node.metadata.content,
+        url: node.metadata?.content || "",
         storageKey: node.metadata.storageKey,
+        aiccUri: node.metadata.aiccUri,
         bytes: node.metadata.bytes,
         width: node.metadata.naturalWidth,
         height: node.metadata.naturalHeight,
@@ -274,13 +276,14 @@ function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
 }
 
 function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
-    if (node.type !== CanvasNodeType.Audio || !node.metadata?.content) return null;
+    if (node.type !== CanvasNodeType.Audio || !(node.metadata?.content || node.metadata?.aiccUri)) return null;
     return {
         id: node.id,
         name: `audio-${node.id}.mp3`,
         type: node.metadata.mimeType || "audio/mpeg",
-        url: node.metadata.content,
+        url: node.metadata?.content || "",
         storageKey: node.metadata.storageKey,
+        aiccUri: node.metadata.aiccUri,
         durationMs: node.metadata.durationMs,
     };
 }

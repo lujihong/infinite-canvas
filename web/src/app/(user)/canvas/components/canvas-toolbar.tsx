@@ -31,6 +31,7 @@ export function CanvasToolbar({
     onShowImageInfoChange,
     onOpenAssetLibrary,
     onOpenMyAssets,
+    onOpenAiccAssets,
     onOpenVideoEditor,
 }: {
     selectedCount: number;
@@ -56,6 +57,7 @@ export function CanvasToolbar({
     onShowImageInfoChange: (show: boolean) => void;
     onOpenAssetLibrary: () => void;
     onOpenMyAssets: () => void;
+    onOpenAiccAssets: () => void;
     onOpenVideoEditor?: () => void;
 }) {
     const wrapRef = useRef<HTMLDivElement>(null);
@@ -72,9 +74,11 @@ export function CanvasToolbar({
     const tip = hovered ? toolLabel(hovered) : "";
 
     return (
-        <div className="pointer-events-none absolute bottom-5 z-50 flex justify-center" style={{ left: 300, right: 16 }}>
+        <div className="pointer-events-none absolute bottom-5 left-4 right-4 z-50 flex justify-center lg:left-[300px]">
             {tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
             <div ref={wrapRef} className="thin-scrollbar pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto rounded-xl border px-2 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
+                <Button type="text" className="!h-8 !px-2" style={{ color: theme.toolbar.item }} onClick={onOpenAiccAssets}>人物素材与认证</Button>
+                <Divider theme={theme} />
                 <ToolbarButton id={`tool-${canvasTool}`} label={canvasTool === "select" ? "选择" : "移动"} active hovered={hovered} activeStyle={activeStyle} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={() => onCanvasToolChange(canvasTool === "select" ? "pan" : "select")}>
                     {canvasTool === "select" ? <MousePointer2 className="size-4.5" /> : <Hand className="size-4.5" />}
                 </ToolbarButton>

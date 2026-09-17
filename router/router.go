@@ -45,6 +45,10 @@ func New() *gin.Engine {
 	anonymousFiles.DELETE("/:id", func(c *gin.Context) {
 		handler.DeleteFile(c.Writer, c.Request, c.Param("id"))
 	})
+	aicc := api.Group("/aicc", middleware.UserAuth)
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
+		aicc.Handle(method, "/*path", gin.WrapF(handler.AICCProxy))
+	}
 	v1 := api.Group("/v1", middleware.UserAuth)
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
@@ -135,7 +139,7 @@ func New() *gin.Engine {
 		handler.AgentSkillFile(c.Writer, c.Request, c.Param("id"))
 	})
 	api.GET("/assets", middleware.OptionalAuth, gin.WrapF(handler.Assets))
-	api.GET("/model-pricing", gin.WrapF(handler.ModelPricing))
+	api.GET("/model-pricing", middleware.UserAuth, gin.WrapF(handler.ModelPricing))
 	api.POST("/admin/login", gin.WrapF(handler.AdminLogin))
 
 	admin := api.Group("/admin", middleware.AdminAuth)

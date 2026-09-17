@@ -571,14 +571,7 @@ func FetchUserWalletBalance(userID string) (map[string]any, error) {
 	if quotaPerUnit <= 0 {
 		quotaPerUnit = 500000
 	}
-	// 工作台统一积分换算体系：1 元人民币 = 10 积分 (1 积分 = 0.1 元)
-	const PointsPerYuan = 10.0
-
-	balanceYuan := float64(quota) / float64(quotaPerUnit)
-	if balanceYuan < 0 {
-		balanceYuan = 0
-	}
-	points := balanceYuan * PointsPerYuan
+	balanceYuan, points := quotaBillingValues(quota, quotaPerUnit)
 
 	return map[string]any{
 		"quota":            quota,
@@ -586,9 +579,62 @@ func FetchUserWalletBalance(userID string) (map[string]any, error) {
 		"points":           points,
 		"formattedPoints":  fmt.Sprintf("%.1f 积分", points),
 		"formattedBalance": fmt.Sprintf("¥ %.2f", balanceYuan),
-		"exchangeRate":     PointsPerYuan,
+		"exchangeRate":     10.0,
 		"minTopup":         1,
 	}, nil
+}
+
+// quotaBillingValues converts the platform quota ledger into CNY account value.
+// This is the current platform top-up convention, not a generic USD exchange rate.
+func quotaBillingValues(quota, quotaPerUnit int64) (yuan, points float64) {
+	if quotaPerUnit <= 0 {
+		quotaPerUnit = 500000
+	}
+	if quota < 0 {
+		quota = 0
+	}
+	yuan = float64(quota) / float64(quotaPerUnit)
+	return yuan, yuan * 10.0
+}
+
+func consumptionStatusLabel(logType int, quota int64, localStatus string) string {
+	switch logType {
+	case 5:
+		if quota == 0 {
+			return "调用失败 · 未扣费"
+		}
+		return "调用失败 · 存在扣费记录"
+	case 6:
+		localStatus = strings.ToLower(strings.TrimSpace(localStatus))
+		if localStatus == "success" || localStatus == "completed" || localStatus == "succeeded" {
+			return "差额退还"
+		}
+		if localStatus == "failed" || localStatus == "error" {
+			return "失败已退款"
+		}
+		return "额度退还"
+	}
+	return ""
+}
+
+func formatBillingPoints(points float64) string {
+	if points > 0 && points < 0.001 {
+		return "<0.001 积分"
+	}
+	if points > 0 && points < 0.01 {
+		return fmt.Sprintf("%.3f 积分", points)
+	}
+	return fmt.Sprintf("%.2f 积分", points)
+}
+
+func formatBillingMoney(yuan float64) string {
+	if yuan > 0 && yuan < 0.000001 {
+		return "¥ <0.000001"
+	}
+	if yuan > 0 && yuan < 0.0001 {
+		return fmt.Sprintf("¥ %.6f", yuan)
+	}
+	return fmt.Sprintf("¥ %.4f", yuan)
 }
 
 type ModelPricingItem struct {
@@ -713,10 +759,10 @@ type ConsumptionLogItem struct {
 	SubmitTime        int64   `json:"submit_time"`
 	CompleteTime      int64   `json:"complete_time"`
 	ModelName         string  `json:"model_name"`
-	Type              int     `json:"type"` // 1: 充值, 2: 消费, 5: 失败报错, 6: 退款
-	Status            string  `json:"status"` // "success" | "failed" | "refunded" | "processing" | "free"
-	StatusLabel       string  `json:"status_label"` // "成功" | "调用失败 · 未扣费" | "失败已退款" | "处理中" | "免费体验"
-	Progress          int     `json:"progress"` // 100
+	Type              int     `json:"type"`             // 1: 充值, 2: 消费, 5: 失败报错, 6: 退款
+	Status            string  `json:"status"`           // "success" | "failed" | "refunded" | "processing" | "free"
+	StatusLabel       string  `json:"status_label"`     // "成功" | "调用失败 · 未扣费" | "失败已退款" | "处理中" | "免费体验"
+	Progress          int     `json:"progress"`         // 100
 	DurationSeconds   float64 `json:"duration_seconds"` // 耗时秒数，例如 145.0
 	TaskID            string  `json:"task_id,omitempty"`
 	TaskAction        string  `json:"task_action,omitempty"` // "图生视频" / "文生视频" / "文生图" / "图像编辑" / "文本对话" / "音频合成"
@@ -747,7 +793,7 @@ func parseErrorMessage(content string, other string) (string, string) {
 
 	if reason, ok := otherMap["reason"].(string); ok && reason != "" {
 		if strings.Contains(reason, "copyright") {
-			return "因生成内容触发版权安全策略，任务已终止并全额退款", reason
+			return "生成内容触发版权安全策略，费用状态请查看扣费与退款记录", reason
 		}
 		return reason, reason
 	}
@@ -787,7 +833,7 @@ func parseErrorMessage(content string, other string) (string, string) {
 		return content, content
 	}
 
-	return "任务异常中断 · 未产生扣费", other
+	return "任务异常中断，费用状态请查看账单", other
 }
 
 func parseTaskAction(modelName string, content string, isVideo bool) string {
@@ -928,28 +974,30 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 
 	// 3. 处理中转站真实物理日志
 	for _, l := range res.Data {
-		moneyYuan := (float64(l.Quota) / float64(quotaPerUnit)) * 10.0
-		pointsCost := moneyYuan * 10.0
-		pointsCost = float64(int(pointsCost*100+0.5)) / 100.0
+		moneyYuan, pointsCost := quotaBillingValues(l.Quota, quotaPerUnit)
 
-		// 解析关联任务信息
-		var taskID string
-		var videoURL string
-		var otherReason string
-		if l.Other != "" {
-			var otherData struct {
-				TaskID string `json:"task_id"`
-				Reason string `json:"reason"`
-			}
-			if json.Unmarshal([]byte(l.Other), &otherData) == nil {
-				if otherData.TaskID != "" {
-					taskID = otherData.TaskID
+			// 解析关联任务信息
+			var taskID string
+			var videoURL string
+			var otherReason string
+			var preConsumedQuota int
+			if l.Other != "" {
+				var otherData struct {
+					TaskID           string `json:"task_id"`
+					Reason           string `json:"reason"`
+					PreConsumedQuota int    `json:"pre_consumed_quota"`
+					ActualQuota      int    `json:"actual_quota"`
 				}
-				if otherData.Reason != "" {
-					otherReason = otherData.Reason
+				if json.Unmarshal([]byte(l.Other), &otherData) == nil {
+					if otherData.TaskID != "" {
+						taskID = otherData.TaskID
+					}
+					if otherData.Reason != "" {
+						otherReason = otherData.Reason
+					}
+					preConsumedQuota = otherData.PreConsumedQuota
 				}
 			}
-		}
 
 		lowerModel := strings.ToLower(l.ModelName)
 		isVideo := strings.Contains(lowerModel, "video") ||
@@ -996,32 +1044,45 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 			videoURL = fmt.Sprintf("https://api.xybcloud.com/v1/videos/%s/content?key=%s", taskID, token)
 		}
 
-		taskAction := parseTaskAction(l.ModelName, l.Content, isVideo)
+			taskAction := parseTaskAction(l.ModelName, l.Content, isVideo)
+			if preConsumedQuota > 0 && l.Type == 2 {
+				taskAction = "差额补扣"
+			}
 
-		// 判定任务状态与展示文案（彻底纠正免扣误解）
-		status := "success"
-		statusLabel := "成功"
-		progress := 100
+			// 判定任务状态与展示文案（彻底纠正免扣误解）
+			status := "success"
+			statusLabel := "成功"
+			if preConsumedQuota > 0 && l.Type == 2 {
+				statusLabel = "差额补扣"
+			}
+			progress := 100
 		errMsg := ""
 		errDetail := ""
-		formattedPoints := fmt.Sprintf("%.2f 积分", pointsCost)
-		if pointsCost < 0.01 && pointsCost > 0 {
-			formattedPoints = fmt.Sprintf("%.3f 积分", pointsCost)
-		}
+		formattedPoints := formatBillingPoints(pointsCost)
 
 		if l.Type == 5 {
-			// Type 5: 明确调用失败/报错，未扣费
+			// Type 5: failed; preserve charged quota when present.
 			status = "failed"
-			statusLabel = "调用失败 · 未扣费"
+			statusLabel = consumptionStatusLabel(l.Type, l.Quota, "")
 			progress = 100
 			errMsg, errDetail = parseErrorMessage(l.Content, l.Other)
-			pointsCost = 0
-			moneyYuan = 0
-			formattedPoints = "0.00 积分"
+			if l.Quota == 0 {
+				pointsCost = 0
+				moneyYuan = 0
+				formattedPoints = "0.00 积分"
+				statusLabel = "调用失败 · 未扣费"
+			} else {
+				statusLabel = "调用失败 · 存在扣费记录"
+				formattedPoints = formatBillingPoints(pointsCost)
+			}
 		} else if l.Type == 6 {
-			// Type 6: 任务失败退款
+			// Type 6: refund/adjustment; do not claim failure unless confirmed.
 			status = "refunded"
-			statusLabel = "失败已退款"
+			localStatus := ""
+			if localMatched != nil {
+				localStatus = localMatched.Status
+			}
+			statusLabel = consumptionStatusLabel(l.Type, l.Quota, localStatus)
 			progress = 100
 			if otherReason != "" {
 				errMsg = otherReason
@@ -1029,9 +1090,9 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 			} else {
 				errMsg, errDetail = parseErrorMessage(l.Content, l.Other)
 			}
-			formattedPoints = fmt.Sprintf("+%.2f 积分", pointsCost)
+			formattedPoints = "+" + formatBillingPoints(pointsCost)
 		} else if l.Type == 2 {
-			if pointsCost <= 0 {
+			if l.Quota == 0 {
 				// 消费类型但扣费为 0：检查是否有错误
 				if strings.Contains(l.Content, "error") || strings.Contains(l.Content, "status_code=") {
 					status = "failed"
@@ -1064,7 +1125,7 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 			PointsCost:        pointsCost,
 			FormattedPoints:   formattedPoints,
 			MoneyYuan:         moneyYuan,
-			FormattedMoney:    fmt.Sprintf("¥ %.4f", moneyYuan),
+			FormattedMoney:    formatBillingMoney(moneyYuan),
 			PromptTokens:      l.PromptTokens,
 			CompletionTokens:  l.CompletionTokens,
 			UseTime:           l.UseTime,

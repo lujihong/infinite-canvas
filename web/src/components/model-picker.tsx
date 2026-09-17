@@ -5,7 +5,7 @@ import { Check, ChevronDown, Cpu, Plus, Search, Sparkles } from "lucide-react";
 import { Popover } from "antd";
 
 import { cn } from "@/lib/utils";
-import { getModelPricing } from "@/constant/credits";
+import { getModelPricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
 import {
     filterModelsByCapability,
     normalizeLocalChannels,
@@ -40,6 +40,7 @@ export function ModelPicker({
 }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
+    const personalPricing = usePersonalPricing(open);
     const [searchKeyword, setSearchKeyword] = useState("");
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -281,6 +282,7 @@ export function ModelPicker({
                             <button
                                 key={option.key}
                                 type="button"
+                                title={pricing ? personalPricingDetails(pricing) : personalPricing.error || "登录后查看本人报价"}
                                 onClick={() => handleSelectModel(option.model, option.channelId)}
                                 className={cn(
                                     "flex w-full flex-col gap-1 rounded-lg p-2 text-left text-xs transition cursor-pointer border",
@@ -307,10 +309,10 @@ export function ModelPicker({
                                     <span>
                                         {pricing ? (
                                             <span className="font-mono text-amber-600 dark:text-amber-400 font-medium">
-                                                {pricing.quota_type === 1 ? `${pricing.points_cost} 积分/次` : "按量扣费"}
+                                                {pricing.formatted_points_cost}
                                             </span>
                                         ) : (
-                                            <span>按量扣费</span>
+                                            <span>{personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
                                         )}
                                     </span>
                                     {option.channelName ? (
@@ -319,6 +321,8 @@ export function ModelPicker({
                                         </span>
                                     ) : null}
                                 </div>
+                                {pricing?.discount ? <span className="pl-5 text-[10px]">本人优惠倍率 {pricing.discount.factor}</span> : null}
+                                {pricing ? <span className="pl-5 text-[10px] whitespace-pre-line opacity-75">{pricing.group_quotes.map(quote => `${quote.group}：${quote.formatted_points_cost}（最终倍率 ${quote.final_ratio}）`).join("\n")}{"\n"}{pricing.billing_mode === "tiered_expr" || pricing.billing_expr ? "表达式计费，按实际用量结算。" : "估算报价，实际计费组由路由决定。"}</span> : null}
                             </button>
                         );
                     })

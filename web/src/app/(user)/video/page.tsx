@@ -9,7 +9,8 @@ import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
 import { CreditSymbol, formatModelCostTag } from "@/constant/credits";
-import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
+import { usePersonalPricing } from "@/services/api/pricing";
+import { AssetPickerModal, type AssetPickerTab, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { KlingV26WorkbenchPanel } from "@/app/(user)/video/components/kling-v26-workbench-panel";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
@@ -114,6 +115,7 @@ function getVideoLogStore(userId?: string): LocalForage {
     return store;
 }
 export default function VideoPage() {
+    usePersonalPricing();
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const elementFileInputRef = useRef<HTMLInputElement>(null);
@@ -148,6 +150,7 @@ export default function VideoPage() {
     const [bottomSettingsCollapsed, setBottomSettingsCollapsed] = useState(true);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [assetPickerTab, setAssetPickerTab] = useState<AssetPickerTab>("my-assets");
     const [assetPickerTarget, setAssetPickerTarget] = useState<AssetPickerTarget>("general");
     const [elementPickerIndex, setElementPickerIndex] = useState(0);
     const [elementUploadIndex, setElementUploadIndex] = useState(0);
@@ -162,6 +165,7 @@ export default function VideoPage() {
     const effectiveConfigRef = useRef(videoConfig);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const aiccSelectionEnabled = isSeedanceVideoConfig({ ...videoConfig, model });
     const canGenerate = Boolean(prompt.trim());
     const pendingCount = results.filter((item) => item.status === "pending").length;
     const klingWorkbench = resolveKlingWorkbenchConfig(videoConfig, model);
@@ -264,7 +268,8 @@ export default function VideoPage() {
         }
     };
 
-    const openAssetPicker = (target: AssetPickerTarget = "general") => {
+    const openAssetPicker = (target: AssetPickerTarget = "general", tab: AssetPickerTab = "my-assets") => {
+        setAssetPickerTab(tab);
         setAssetPickerTarget(target);
         setAssetPickerOpen(true);
     };
@@ -808,6 +813,10 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
+        if ("aiccUri" in payload && payload.aiccUri && !aiccSelectionEnabled) {
+            message.warning("请切换 Seedance 后再选用人物素材；当前仍可管理素材与认证");
+            return;
+        }
         const insertImage = async () => {
             if (!referenceImageLimit) {
                 message.warning("当前 Kling 模型不支持参考图");
@@ -817,14 +826,14 @@ export default function VideoPage() {
                 message.warning("请选择图片素材");
                 return;
             }
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey }].slice(0, referenceImageLimit));
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey, aiccUri: payload.aiccUri }].slice(0, referenceImageLimit));
         };
         const insertFrame = (slot: "first" | "last") => {
             if (payload.kind !== "image") {
                 message.warning("请选择图片素材");
                 return;
             }
-            const next = { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey };
+            const next = { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey, aiccUri: payload.aiccUri };
             slot === "first" ? setFirstFrame(next) : setLastFrame(next);
         };
         const insertVideo = () => {
@@ -836,7 +845,7 @@ export default function VideoPage() {
                 message.warning("请选择视频素材");
                 return;
             }
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, videoReferenceLimit));
+            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, aiccUri: payload.aiccUri, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, videoReferenceLimit));
         };
         const insertAudio = () => {
             if (isKlingWorkbench) {
@@ -847,7 +856,7 @@ export default function VideoPage() {
                 message.warning("请选择音频素材");
                 return;
             }
-            const next = filterAudioReferencesByDuration(audioReferences, [{ id: nanoid(), name: payload.title, type: payload.mimeType || "audio/mpeg", url: payload.url, storageKey: payload.storageKey, durationMs: payload.durationMs }], message.warning);
+            const next = filterAudioReferencesByDuration(audioReferences, [{ id: nanoid(), name: payload.title, type: payload.mimeType || "audio/mpeg", url: payload.url, storageKey: payload.storageKey, aiccUri: payload.aiccUri, durationMs: payload.durationMs }], message.warning);
             setAudioReferences((value) => [...value, ...next].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
         };
 
@@ -881,6 +890,7 @@ export default function VideoPage() {
     };
 
     const elementReferenceFromAsset = (payload: InsertAssetPayload): VideoElementReference | null => {
+        if (payload.kind !== "text" && payload.aiccUri) return null;
         if (payload.kind === "image") return { id: nanoid(), kind: "image", name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey, bytes: payload.bytes, width: payload.width, height: payload.height };
         if (payload.kind === "video") return { id: nanoid(), kind: "video", name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, bytes: payload.bytes, width: payload.width, height: payload.height };
         if (payload.kind === "audio") return { id: nanoid(), kind: "audio", name: payload.title, type: payload.mimeType || "audio/mpeg", url: payload.url, storageKey: payload.storageKey, durationMs: payload.durationMs };
@@ -1075,6 +1085,8 @@ export default function VideoPage() {
             <main className={`${workbenchLayout === "side" ? "grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)]" : "relative flex flex-col"} min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:overflow-hidden`}>
                 {workbenchLayout === "side" ? (
                     <>
+                        <div className="flex min-h-0 flex-col gap-2">
+                        <Button className="shrink-0" icon={<FolderPlus className="size-4" />} onClick={() => openAssetPicker("general", "aicc")}>人物素材与认证</Button>
                         {isKlingWorkbench ? (
                             <KlingV26WorkbenchPanel
                                 isKlingV3={klingWorkbenchVariant === "v3"}
@@ -1161,6 +1173,7 @@ export default function VideoPage() {
                             onGenerate={() => void generate()}
                         />
                         )}
+                        </div>
                         <ResultsPanel
                             results={results}
                             logs={logs}
@@ -1304,7 +1317,7 @@ export default function VideoPage() {
                 }}
             />
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
-            <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal allowAicc aiccSelectionEnabled={aiccSelectionEnabled} open={assetPickerOpen} defaultTab={assetPickerTab} onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>
@@ -1377,7 +1390,7 @@ function WorkbenchPanel({
     onPromptChange: (value: string) => void;
     onNegativePromptChange?: (value: string) => void;
     onOpenPromptLibrary: () => void;
-    onOpenAssetPicker: (target?: AssetPickerTarget) => void;
+    onOpenAssetPicker: (target?: AssetPickerTarget, tab?: AssetPickerTab) => void;
     onPastePrompt: () => void;
     onClearPrompt: () => void;
     onPasteReferences: () => void;
@@ -1438,6 +1451,7 @@ function WorkbenchPanel({
                                 <Button title="清空输入" icon={<Trash2 className="size-4" />} onClick={onClearPrompt} />
                                 <Button title="提示词库" icon={<BookOpen className="size-4" />} onClick={onOpenPromptLibrary} />
                                 <Button title="我的素材" icon={<FolderPlus className="size-4" />} onClick={() => onOpenAssetPicker()} />
+                                <Button size="small" onClick={() => onOpenAssetPicker("general", "aicc")}>人物素材与认证</Button>
                                 <Button title="参数配置" className={`lg:hidden ${!bottomSettingsCollapsed ? "!border-sky-500/30 !bg-sky-500/10 !text-sky-500" : ""}`} icon={<SlidersHorizontal className="size-4" />} onClick={() => setBottomSettingsCollapsed?.(!bottomSettingsCollapsed)} />
                                 <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
                                 <Button type="primary" className="h-9 rounded-xl px-3 font-medium lg:!hidden" disabled={!canGenerate} onClick={onGenerate}>

@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { Zap } from "lucide-react";
-import { fetchModelPricingList, type ModelPricingItem } from "@/services/api/pricing";
+import { getModelPricing } from "@/services/api/pricing";
+export { getModelPricing, loadRemotePricing } from "@/services/api/pricing";
 
 export function CreditSymbol({ className, ...props }: ComponentProps<"span">) {
     return (
@@ -14,50 +15,6 @@ export type ModelCreditCost = {
     model: string;
     credits: number;
 };
-
-// 全局动态模型计费缓存（从中转站 api.xybcloud.com/api/pricing 实时同步）
-let cachedPricingMap = new Map<string, ModelPricingItem>();
-let pricingFetched = false;
-let isFetchingPricing = false;
-
-export function loadRemotePricing(): Promise<Map<string, ModelPricingItem>> {
-    if (typeof window === "undefined") return Promise.resolve(cachedPricingMap);
-    if (pricingFetched && cachedPricingMap.size > 0) return Promise.resolve(cachedPricingMap);
-    if (isFetchingPricing) return Promise.resolve(cachedPricingMap);
-
-    isFetchingPricing = true;
-    return fetchModelPricingList()
-        .then((items) => {
-            const map = new Map<string, ModelPricingItem>();
-            if (Array.isArray(items)) {
-                items.forEach((item) => {
-                    map.set(item.model_name.toLowerCase(), item);
-                });
-            }
-            cachedPricingMap = map;
-            pricingFetched = true;
-            return map;
-        })
-        .catch(() => cachedPricingMap)
-        .finally(() => {
-            isFetchingPricing = false;
-        });
-}
-
-// 自动触发静默加载
-if (typeof window !== "undefined") {
-    setTimeout(() => {
-        void loadRemotePricing();
-    }, 100);
-}
-
-/**
- * 获取当前模型在中转站的精确计费信息
- */
-export function getModelPricing(modelName: string): ModelPricingItem | undefined {
-    const key = (modelName || "").trim().toLowerCase();
-    return cachedPricingMap.get(key);
-}
 
 /**
  * 预估模型基准积分（兜底安全逻辑）
@@ -136,8 +93,10 @@ export function requestCreditCost(options: {
     const isVideo = mode === "video" || model.includes("video") || model.includes("seedance") || model.includes("kling") || model.includes("sora") || model.includes("minimax-h3");
 
     // 1. 优先查中转站真实定价
-    const pricing = getModelPricing(model);
+    const pricing = getModelPricing(options.model || "");
     if (pricing) {
+        // Personal USD/group quotes cannot be converted into certain task credits.
+        if (pricing.estimated || pricing.points_cost === null || pricing.billing_mode === "tiered_expr" || pricing.billing_expr) return 0;
         if (pricing.quota_type === 1) {
             let basePoints = pricing.points_cost;
             // 视频任务：基准单价对应标准 5 秒，随实际秒数与分辨率精准乘算
@@ -170,13 +129,9 @@ export function requestCreditCost(options: {
         return Math.round(configured * (mode === "image" ? count : 1) * 100) / 100;
     }
 
-    // 3. 兜底估算
-    const base = estimateModelBaseCredits(model, mode);
-    if (isVideo) {
-        const sec = Math.max(1, Number(options.seconds) || 5);
-        return Math.round((base / 5) * sec * 100) / 100;
-    }
-    return Math.round(base * (mode === "image" ? count : 1) * 100) / 100;
+    // No verified price/configuration: let existing consumers display usage billing.
+    // Model-name heuristics cannot establish a real customer-specific quote.
+    return 0;
 }
 
 /**
@@ -191,6 +146,9 @@ export function formatModelCostTag(options: {
     modelCosts?: ModelCreditCost[];
 }): string {
     const pricing = getModelPricing(options.model);
+    if (!pricing) return "本人报价暂不可用";
+    if (pricing.billing_mode === "tiered_expr" || pricing.billing_expr) return "按实际用量结算";
+    if (pricing.estimated) return pricing.formatted_points_cost;
     if (pricing && pricing.quota_type === 0) {
         return "按量扣费";
     }

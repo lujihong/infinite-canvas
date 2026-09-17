@@ -2660,6 +2660,16 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             createNode(CanvasNodeType.Text, position, payload.content, nodeId);
             return;
         }
+        if (payload.aiccUri) {
+            const type = payload.kind === "image" ? CanvasNodeType.Image : payload.kind === "video" ? CanvasNodeType.Video : CanvasNodeType.Audio;
+            const spec = NODE_DEFAULT_SIZE[type];
+            const id = nodeId || `aicc-${Date.now()}-${nanoid()}`;
+            const preview = payload.kind === "image" ? payload.dataUrl : payload.url;
+            setNodes(prev => [...prev, {id, type, title: payload.title, position: {x:center.x-spec.width/2,y:center.y-spec.height/2}, width:spec.width,height:spec.height, metadata:{content:preview,aiccUri:payload.aiccUri,status:NODE_STATUS_SUCCESS,mimeType:payload.mimeType}}]);
+            setSelectedNodeIds(new Set([id]));
+            setSelectedConnectionId(null);
+            return;
+        }
         if (payload.kind === "video") {
             const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
             const id = nodeId || `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -4337,6 +4347,11 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         setAssetPickerTab("library");
                         setAssetPickerOpen(true);
                     }}
+                    onOpenAiccAssets={() => {
+                        assetInsertPositionRef.current = null;
+                        setAssetPickerTab("aicc");
+                        setAssetPickerOpen(true);
+                    }}
                     onOpenMyAssets={() => {
                         setAssetPickerTab("my-assets");
                         setAssetPickerOpen(true);
@@ -4513,7 +4528,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     <p className="text-sm opacity-60">这会删除当前画布上的所有节点和连线。</p>
                 </Modal>
 
-                <AssetPickerModal open={assetPickerOpen} defaultTab={assetPickerTab} onInsert={handleAssetInsert} onClose={() => { assetInsertPositionRef.current = null; setAssetPickerOpen(false); }} />
+                <AssetPickerModal allowAicc open={assetPickerOpen} defaultTab={assetPickerTab} onInsert={handleAssetInsert} onClose={() => { assetInsertPositionRef.current = null; setAssetPickerOpen(false); }} />
             </section>
             {assistantMounted ? (
                 <CanvasAssistantPanel

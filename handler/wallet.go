@@ -63,9 +63,15 @@ func UserRechargeStatus(w http.ResponseWriter, r *http.Request) {
 	OK(w, status)
 }
 
-// ModelPricing 获取中转站全量模型的实时计费与积分单价
+// ModelPricing 只返回当前登录用户的专属报价，不缓存、不回退到公共价格。
 func ModelPricing(w http.ResponseWriter, r *http.Request) {
-	pricing, err := service.FetchModelPricingList()
+	w.Header().Set("Cache-Control", "private, no-store")
+	user, ok := service.UserFromContext(r.Context())
+	if !ok || user.ID == "" {
+		Fail(w, "请先登录后查看本人报价")
+		return
+	}
+	pricing, err := service.FetchPersonalModelPricingList(r.Context(), user.ID)
 	if err != nil {
 		FailError(w, err)
 		return

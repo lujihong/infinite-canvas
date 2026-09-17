@@ -107,9 +107,9 @@ export function isCanvasReferenceNode(node: CanvasNodeData) {
 }
 
 function resourceKind(node: CanvasNodeData): CanvasResourceKind | null {
-    if (isCanvasImageNodeType(node.type) && node.metadata?.content) return "image";
-    if (node.type === CanvasNodeType.Video && node.metadata?.content) return "video";
-    if (node.type === CanvasNodeType.Audio && node.metadata?.content) return "audio";
+    if (isCanvasImageNodeType(node.type) && (node.metadata?.content || node.metadata?.aiccUri)) return "image";
+    if (node.type === CanvasNodeType.Video && (node.metadata?.content || node.metadata?.aiccUri)) return "video";
+    if (node.type === CanvasNodeType.Audio && (node.metadata?.content || node.metadata?.aiccUri)) return "audio";
     if (node.type === CanvasNodeType.Text && (node.metadata?.content || node.metadata?.prompt)) return "text";
     return null;
 }

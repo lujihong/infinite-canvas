@@ -6,6 +6,7 @@ import { App, Button, Empty, Input, Modal, Pagination, Spin, Tabs, Tag } from "a
 import { ImagePlus, Plus, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { AiccAssetPicker } from "@/components/aicc/asset-picker";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { fetchAssetLibrary, type AssetLibraryItem } from "@/services/api/assets";
 import { uploadAssetMediaFile } from "@/services/file-storage";
@@ -14,16 +15,18 @@ import type { InsertAssetPayload } from "../types";
 
 export type { InsertAssetPayload } from "../types";
 
-export type AssetPickerTab = "my-assets" | "library";
+export type AssetPickerTab = "my-assets" | "library" | "aicc";
 
 type Props = {
     open: boolean;
     defaultTab?: AssetPickerTab;
+    allowAicc?: boolean;
+    aiccSelectionEnabled?: boolean;
     onInsert: (payload: InsertAssetPayload) => void;
     onClose: () => void;
 };
 
-export function AssetPickerModal({ open, defaultTab = "my-assets", onInsert, onClose }: Props) {
+export function AssetPickerModal({ open, defaultTab = "my-assets", allowAicc = false, aiccSelectionEnabled = true, onInsert, onClose }: Props) {
     const [activeTab, setActiveTab] = useState<AssetPickerTab>(defaultTab);
 
     useEffect(() => {
@@ -31,13 +34,14 @@ export function AssetPickerModal({ open, defaultTab = "my-assets", onInsert, onC
     }, [open, defaultTab]);
 
     return (
-        <Modal title="选择素材" open={open} onCancel={onClose} footer={null} width={860} destroyOnHidden styles={{ body: { padding: "0 24px 24px", minHeight: 480 } }}>
+        <Modal title="选择素材" open={open} onCancel={onClose} footer={null} width={860} destroyOnHidden styles={{ body: { padding: "0 16px 16px", maxHeight: "75dvh", overflowY: "auto", overflowX: "hidden" } }}>
             <Tabs
                 activeKey={activeTab}
                 onChange={(key) => setActiveTab(key as AssetPickerTab)}
                 items={[
                     { key: "my-assets", label: "我的素材", children: <MyAssetsTab onInsert={onInsert} /> },
                     { key: "library", label: "素材库", children: <LibraryTab onInsert={onInsert} /> },
+                    ...(allowAicc ? [{ key: "aicc", label: "人物素材与认证", children: open && activeTab === "aicc" ? <AiccAssetPicker onInsert={onInsert} selectionEnabled={aiccSelectionEnabled} /> : null }] : []),
                 ]}
             />
         </Modal>

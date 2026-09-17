@@ -506,7 +506,7 @@ function isProviderKlingConfig(config: AiConfig, modelName: string, key: string,
     if (modelKey(model) !== key) return false;
     const scopedConfig = { ...config, model, videoModel: model };
     const channelId = channelIdForActiveModel(scopedConfig);
-    const channels = config.channelMode === "remote" ? config.publicChannels : [localChannelForActiveModel(scopedConfig)];
+    const channels: Array<AiConfig["publicChannels"][number] | ReturnType<typeof localChannelForActiveModel>> = config.channelMode === "remote" ? config.publicChannels : [localChannelForActiveModel(scopedConfig)];
     const channel = channels.find((item) => (item?.id || "") === channelId) || channels[0];
     const record = channel as { id?: string; name?: string; baseUrl?: string; remark?: string } | undefined;
     const text = [record?.id, record?.name, record?.baseUrl, record?.remark].filter(Boolean).join(" ").toLowerCase();

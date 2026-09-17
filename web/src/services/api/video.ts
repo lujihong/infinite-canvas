@@ -229,35 +229,68 @@ export function formatPlayableVideoUrl(url?: string, model = ""): string {
 
 async function cacheProtectedVideoContent(config: AiConfig, model: string, task: VideoResponse) {
     const url = task.video_url || task.url || "";
-    if (!isCompletedVideoStatus(task.status) || task.storageKey || !url) return task;
+    if (!isCompletedVideoStatus(task.status) || task.storageKey) return task;
     // 如果已经由服务端本地对象存储托管，则无需二次转存
     if (url.startsWith("/api/files/")) return task;
 
     try {
         const taskIdMatch = url.match(/\/videos\/([^/?#]+)\/content/i);
-        const taskId = task.task_id || task.id || task.video_id || (taskIdMatch ? taskIdMatch[1] : "");
+        let taskId = task.task_id || task.id || task.video_id || (taskIdMatch ? taskIdMatch[1] : "");
         const effectiveModel = model || task.model || "";
+
+        // The workbench may expose its client task ID while the relay content
+        // endpoint requires the upstream task ID. Resolve that mapping before
+        // requesting /content; this also repairs older completed tasks.
+        if (usesAccountProxy(config) && taskId.startsWith("client_video_task_")) {
+            try {
+                const payload = (await axios.get<ApiVideoResponse>(`/api/v1/videos/${encodeURIComponent(taskId)}`, { headers: aiHeaders(config), params: { model: effectiveModel } })).data;
+                if (isVideoEnvelope(payload) && payload.code !== 0) throw new VideoRequestError(payload.msg || payload.message || "读取视频任务失败", payload);
+                const detail = isVideoEnvelope(payload) ? payload.data : payload;
+                // Do not normalize here: normalization can synthesize task_id from id.
+                if (detail && !Array.isArray(detail) && !videoPayloadErrorMessage(detail)) {
+                    const upstreamTaskId = typeof detail.task_id === "string" ? detail.task_id.trim() : "";
+                    if (upstreamTaskId && !upstreamTaskId.startsWith("client_video_task_")) taskId = upstreamTaskId;
+                }
+            } catch {
+                // Keep the original ID so the normal fallback and diagnostics remain intact.
+            }
+        }
 
         let response: Response | null = null;
         if (usesAccountProxy(config) && taskId) {
             const fetchUrl = `${aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}/content`)}?model=${encodeURIComponent(effectiveModel)}`;
             response = await fetch(fetchUrl, { headers: aiHeaders(config) }).catch(() => null);
         }
-        if (!response || !response.ok) {
-            const channel = localChannelForActiveModel(config);
-            const authHeader = (channel?.apiKey ? { Authorization: `Bearer ${channel.apiKey}` } : (config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})) as HeadersInit;
-            response = await fetch(url, { headers: authHeader }).catch(() => null);
+        if ((!response || !response.ok) && !usesAccountProxy(config) && taskId) {
+            response = await fetch(aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}/content`), { headers: aiHeaders(config) }).catch(() => null);
+        }
+        if ((!response || !response.ok) && url) {
+            // CDN and signed artifact URLs must never receive the provider API key.
+            response = await fetch(url).catch(() => null);
         }
         if (response && response.ok) {
             const blob = await response.blob();
+            const signature = new Uint8Array(await blob.slice(0, 4096).arrayBuffer());
+            const boxSize = signature.length >= 4 ? new DataView(signature.buffer).getUint32(0) : 0;
+            const brands: string[] = [];
+            if (boxSize >= 16 && boxSize <= signature.length && String.fromCharCode(...signature.slice(4, 8)) === "ftyp") {
+                brands.push(String.fromCharCode(...signature.slice(8, 12)));
+                for (let offset = 16; offset + 4 <= boxSize; offset += 4) brands.push(String.fromCharCode(...signature.slice(offset, offset + 4)));
+            }
+            const imageBrand = brands.some(brand => /^(avif|avis|heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(brand));
+            const isMP4 = !imageBrand && brands.some(brand => /^(isom|iso[2-9]|mp4[12]|avc1|dash|M4V |qt  )$/.test(brand));
+            const isWebM = signature.length >= 4 && signature[0] === 0x1a && signature[1] === 0x45 && signature[2] === 0xdf && signature[3] === 0xa3;
+            if (!blob.size || blob.type.startsWith("image/") || (!isMP4 && !isWebM)) {
+                throw new VideoRequestError("视频内容接口未返回有效视频，请稍后重新读取任务", { taskId, contentType: blob.type });
+            }
             // 优先转存到服务端持久化存储（WebDAV/S3），失败则 LocalForage 兜底
             try {
                 const { uploadAssetMediaFile } = await import("@/services/file-storage");
                 const serverMedia = await uploadAssetMediaFile(new File([blob], `video-${taskId || nanoid()}.mp4`, { type: blob.type || "video/mp4" }));
-                return { ...task, url: serverMedia.url, video_url: serverMedia.url, storageKey: serverMedia.storageKey, task_id: taskId || task.task_id, id: taskId || task.id };
+                return { ...task, url: serverMedia.url, video_url: serverMedia.url, storageKey: serverMedia.storageKey, task_id: taskId || task.task_id };
             } catch {
                 const media = await uploadMediaFile(blob, "generated-video");
-                return { ...task, url: media.url, video_url: media.url, storageKey: media.storageKey, task_id: taskId || task.task_id, id: taskId || task.id };
+                return { ...task, url: media.url, video_url: media.url, storageKey: media.storageKey, task_id: taskId || task.task_id };
             }
         }
     } catch (err) {
@@ -309,6 +342,8 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
 }
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    const aiccReferences = [...input.references, ...input.videoReferences, ...input.audioReferences, input.firstFrame, input.lastFrame].filter(item => item?.aiccUri);
+    if (aiccReferences.length && !model.toLowerCase().includes("seedance")) throw new VideoRequestError("人物资产仅支持 Seedance 视频模型，请切换模型或移除人物素材");
     const size = normalizeVideoSize(config.size);
     if (isGeminiVideoModel(model) && isGeminiConfig(config, model)) return createGeminiVeoRequestBody(config, model, prompt, input);
     if (isGrok2APIVideoConfig(config, model)) return createGrok2APIVideoRequestBody(config, model, prompt, input);
@@ -593,7 +628,13 @@ async function imageReferenceToFile(image: ReferenceImage) {
     return dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) });
 }
 
+function checkedAiccUri(value: string) {
+    if (!/^asset:\/\/asset-[A-Za-z0-9_-]+$/.test(value)) throw new VideoRequestError("人物素材引用格式异常，请重新选择素材");
+    return value;
+}
+
 async function imageReferenceToFormValue(image: ReferenceImage) {
+    if (image.aiccUri) return checkedAiccUri(image.aiccUri);
     const resolvedUrl = await resolveImageUrl(image.storageKey, "");
     for (const url of [image.url, resolvedUrl, image.dataUrl]) {
         const publicUrl = publicHttpUrl(url);
@@ -611,6 +652,7 @@ async function mediaReferenceToFile(media: ReferenceVideo | ReferenceAudio) {
 }
 
 async function mediaReferenceToFormValue(media: ReferenceVideo | ReferenceAudio) {
+    if (media.aiccUri) return checkedAiccUri(media.aiccUri);
     const resolvedUrl = await resolveMediaUrl(media.storageKey, media.url);
     const publicUrl = publicHttpUrl(resolvedUrl) || publicHttpUrl(media.url);
     if (publicUrl) return publicUrl;

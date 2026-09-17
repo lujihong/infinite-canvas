@@ -8,6 +8,10 @@ import { cn } from "@/lib/utils";
 
 export type TransitionVariant = "circle" | "square" | "triangle" | "diamond" | "hexagon" | "rectangle" | "star";
 
+type DocumentWithViewTransition = Document & {
+    startViewTransition?: (update: () => void) => { ready: Promise<void>; finished: Promise<void> };
+};
+
 interface AnimatedThemeTogglerProps extends React.ComponentPropsWithoutRef<"button"> {
     duration?: number;
     variant?: TransitionVariant;
@@ -138,7 +142,8 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
             onThemeChange?.(nextTheme);
         };
 
-        if (typeof document.startViewTransition !== "function") {
+        const transitionDocument = document as DocumentWithViewTransition;
+        if (typeof transitionDocument.startViewTransition !== "function") {
             applyTheme();
             return;
         }
@@ -157,7 +162,7 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
             root.style.removeProperty("--magicui-theme-vt-clip-from");
         };
 
-        const transition = document.startViewTransition(() => {
+        const transition = transitionDocument.startViewTransition(() => {
             flushSync(applyTheme);
         });
         if (typeof transition?.finished?.finally === "function") {

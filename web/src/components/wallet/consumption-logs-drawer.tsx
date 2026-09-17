@@ -34,6 +34,7 @@ import {
 } from "@/services/api/auth";
 import { useUserStore } from "@/stores/use-user-store";
 import { useWalletStore } from "@/stores/use-wallet-store";
+import { consumptionCostPresentation } from "./consumption-cost";
 
 type ConsumptionLogsDrawerProps = {
     open: boolean;
@@ -395,6 +396,7 @@ export function ConsumptionLogsDrawer({
                                 </div>
                             ) : filteredLogs.length > 0 ? (
                                 filteredLogs.map((log) => {
+                                    const cost = consumptionCostPresentation(log);
                                     const isFailed = log.status === "failed" || log.type === 5;
                                     const isRefund = log.status === "refunded" || log.type === 6;
                                     const isProcessing = log.status === "processing";
@@ -501,26 +503,10 @@ export function ConsumptionLogsDrawer({
                                                                 : "text-amber-600 dark:text-amber-400"
                                                         }`}
                                                     >
-                                                        {isFailed
-                                                            ? "0.00 积分"
-                                                            : isRefund
-                                                            ? `+${log.formatted_points}`
-                                                            : isProcessing
-                                                            ? "计算中"
-                                                            : isFree
-                                                            ? "0.00 积分"
-                                                            : `-${log.formatted_points}`}
+                                                        {cost.amount}
                                                     </div>
                                                     <div className="text-[11px] text-stone-400">
-                                                        {isFailed
-                                                            ? "调用未完成 · 未产生扣费"
-                                                            : isRefund
-                                                            ? "任务失败 · 积分已全额返还"
-                                                            : isProcessing
-                                                            ? "生成中暂未扣除"
-                                                            : isFree
-                                                            ? "平台免费体验模型"
-                                                            : `折合 ${log.formatted_money}`}
+                                                        {cost.detail}
                                                     </div>
                                                 </div>
                                             </div>

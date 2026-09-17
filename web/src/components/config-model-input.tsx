@@ -5,7 +5,7 @@ import { AutoComplete, Input, Typography } from "antd";
 import { Check, ChevronDown, Cpu, Sparkles, Zap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { getModelPricing } from "@/constant/credits";
+import { getModelPricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
 import {
     filterModelsByCapability,
     normalizeLocalChannels,
@@ -33,6 +33,7 @@ export function ConfigModelInput({
     placeholder = "直接输入模型名称或下拉选择",
 }: ConfigModelInputProps) {
     const [inputValue, setInputValue] = useState(value || "");
+    const personalPricing = usePersonalPricing();
 
     useEffect(() => {
         setInputValue(value || "");
@@ -154,7 +155,7 @@ export function ConfigModelInput({
             return {
                 value: item.model,
                 label: (
-                    <div className={cn(
+                    <div title={pricing ? personalPricingDetails(pricing) : personalPricing.error || "登录后查看本人报价"} className={cn(
                         "flex flex-col gap-1 py-1.5 px-1 text-xs border-b border-stone-100/60 dark:border-stone-800/60 last:border-b-0 rounded transition-colors",
                         isSelected && "bg-stone-100/60 dark:bg-stone-800/50"
                     )}>
@@ -181,10 +182,10 @@ export function ConfigModelInput({
                                 {pricing ? (
                                     <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-mono font-medium">
                                         <Zap className="size-3 fill-current" />
-                                        {pricing.quota_type === 1 ? `${pricing.points_cost} 积分/次` : "按量扣费"}
+                                        {pricing.formatted_points_cost}
                                     </span>
                                 ) : (
-                                    <span>{item.channelName || "官方模型服务"}</span>
+                                    <span>{personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
                                 )}
                             </span>
                             {pricing && item.channelName ? (
@@ -193,6 +194,8 @@ export function ConfigModelInput({
                                 </span>
                             ) : null}
                         </div>
+                        {pricing?.discount ? <span className="pl-5 text-[10px]">本人优惠倍率 {pricing.discount.factor}</span> : null}
+                        {pricing ? <span className="pl-5 text-[10px] whitespace-pre-line opacity-75">{pricing.group_quotes.map(quote => `${quote.group}：${quote.formatted_points_cost}（最终倍率 ${quote.final_ratio}）`).join("\n")}{"\n"}{pricing.billing_mode === "tiered_expr" || pricing.billing_expr ? "表达式计费，按实际用量结算。" : "估算报价，实际计费组由路由决定。"}</span> : null}
                     </div>
                 ),
             };
@@ -213,7 +216,7 @@ export function ConfigModelInput({
         }
 
         return result;
-    }, [filteredModels, inputValue, value]);
+    }, [filteredModels, inputValue, value, personalPricing]);
 
     const applyModel = (targetModel: string) => {
         const trimmed = targetModel.trim();
