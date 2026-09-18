@@ -75,7 +75,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         finally { if (version === lifecycle.current) setBusy(false); }
     };
     const insert = (asset: AiccAsset) => {
-        if (!selectionEnabled || asset.status.toUpperCase() !== "ACTIVE") return;
+        if (asset.status.toUpperCase() !== "ACTIVE") return;
         const aiccUri = `asset://${asset.assetId}`;
         if (!/^asset:\/\/asset-[A-Za-z0-9_-]+$/.test(aiccUri)) {message.error("素材标识异常，请刷新");return;}
         const preview = /^https?:\/\//.test(asset.assetUrl || "") ? asset.assetUrl! : "";
@@ -90,7 +90,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
             <Button loading={busy} onClick={() => void begin()}>发起真人认证</Button>
         </div>
         <p className="text-xs text-stone-500 dark:text-stone-400">素材来自移动云，仅展示当前账号有权访问的素材。选用后自动带入资产引用，不需要手动复制 ID。</p>
-        {!selectionEnabled && <Alert type="info" showIcon message="当前模型仅可管理人物素材与认证；切换 Seedance 后再选用。" />}
+        {!selectionEnabled && <Alert type="info" showIcon message="选用真人素材将自动为您切换至匹配的移动云 Seedance 2.0 合规模型。" />}
         <p className="text-xs text-stone-500 dark:text-stone-400">真人认证成功后，可在同一人物组继续添加本人的素材；移动云会进行同人一致性与最终入库校验，认证或上传成功不保证素材入库成功。</p>
         {failure && <Alert type="error" showIcon message={failure} />}
         {session && <section className="flex flex-wrap items-center gap-4 rounded-lg border border-stone-200 p-4 dark:border-stone-700">
@@ -109,7 +109,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         {group && <>
             <AssetUploadForm key={`${type}:${group.groupId}`} group={group} onSubmitted={refreshAssets} />
             <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-stone-500">处理中每 10 秒检查，最多 12 次；页面不可见时暂停，可手动刷新。</span><Button onClick={refreshAssets}>刷新素材</Button></div>
-            {assets.isError ? <Alert type="error" message={errorText(assets.error)} /> : assets.isLoading ? <Spin /> : !assets.data?.data.length ? <Empty description="本页暂无素材" /> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">{assets.data.data.map(asset=><article key={asset.assetId} className="min-w-0 rounded-lg border border-stone-200 p-3 dark:border-stone-700"><div className="mb-2 flex aspect-video items-center justify-center overflow-hidden rounded bg-stone-100 dark:bg-stone-900">{asset.assetUrl && /^https?:\/\//.test(asset.assetUrl) ? asset.assetType === "Image" ? <img src={asset.assetUrl} alt={asset.assetName} loading="lazy" className="h-full w-full object-contain" /> : asset.assetType === "Video" ? <video src={asset.assetUrl} aria-label={asset.assetName} controls playsInline preload="none" className="h-full w-full object-contain" /> : <audio src={asset.assetUrl} aria-label={asset.assetName} controls preload="none" className="w-full" /> : <span className="text-xs text-stone-500">暂无预览</span>}</div><div className="flex items-center justify-between gap-2"><span className="truncate" title={asset.assetName}>{asset.assetName||"未命名素材"}</span><Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag></div><Button className="mt-3 w-full" type="primary" disabled={!selectionEnabled || asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button></article>)}</div>}
+            {assets.isError ? <Alert type="error" message={errorText(assets.error)} /> : assets.isLoading ? <Spin /> : !assets.data?.data.length ? <Empty description="本页暂无素材" /> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">{assets.data.data.map(asset=><article key={asset.assetId} className="min-w-0 rounded-lg border border-stone-200 p-3 dark:border-stone-700"><div className="mb-2 flex aspect-video items-center justify-center overflow-hidden rounded bg-stone-100 dark:bg-stone-900">{asset.assetUrl && /^https?:\/\//.test(asset.assetUrl) ? asset.assetType === "Image" ? <img src={asset.assetUrl} alt={asset.assetName} loading="lazy" className="h-full w-full object-contain" /> : asset.assetType === "Video" ? <video src={asset.assetUrl} aria-label={asset.assetName} controls playsInline preload="none" className="h-full w-full object-contain" /> : <audio src={asset.assetUrl} aria-label={asset.assetName} controls preload="none" className="w-full" /> : <span className="text-xs text-stone-500">暂无预览</span>}</div><div className="flex items-center justify-between gap-2"><span className="truncate font-medium text-xs" title={asset.assetName}>{asset.assetName||"未命名素材"}</span><div className="flex items-center gap-1 shrink-0"><Tag color="cyan">移动云合规</Tag><Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag></div></div><Button className="mt-3 w-full" type="primary" disabled={asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button></article>)}</div>}
             <nav aria-label="人物素材分页" className="flex flex-wrap items-center justify-end border-t border-stone-200 dark:border-stone-700" style={{ marginTop: 16, paddingTop: 12, gap: 12 }}>
                 <Button size="small" aria-label="素材上一页" disabled={assetPage<=1 || assets.isFetching} onClick={()=>setAssetPage(p=>p-1)}>上一页</Button>
                 <span className="text-xs text-stone-500 dark:text-stone-400" style={{ minWidth: 68, textAlign: "center", whiteSpace: "nowrap" }}>第 {assetPage} 页</span>

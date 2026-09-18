@@ -163,6 +163,7 @@ export default function VideoPage() {
     const pollingLogIdsRef = useRef(new Set<string>());
     const logsRef = useRef<GenerationLog[]>([]);
     const effectiveConfigRef = useRef(videoConfig);
+    const previousModelRef = useRef<string | null>(null);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const aiccSelectionEnabled = isSeedanceVideoConfig({ ...videoConfig, model });
@@ -813,9 +814,29 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
-        if ("aiccUri" in payload && payload.aiccUri && !aiccSelectionEnabled) {
-            message.warning("请切换 Seedance 后再选用人物素材；当前仍可管理素材与认证");
-            return;
+        if ("aiccUri" in payload && payload.aiccUri) {
+            if (!aiccSelectionEnabled) {
+                previousModelRef.current = model;
+                updateConfig("videoModel", "doubao-seedance-2.0");
+                message.success(
+                    <span>
+                        已选用真人肖像素材，自动切换为移动云 Seedance 2.0 模型
+                        <button
+                            type="button"
+                            className="ml-2.5 font-bold underline cursor-pointer text-amber-500 hover:text-amber-400"
+                            onClick={() => {
+                                if (previousModelRef.current) {
+                                    updateConfig("videoModel", previousModelRef.current);
+                                    previousModelRef.current = null;
+                                }
+                            }}
+                        >
+                            撤销
+                        </button>
+                    </span>,
+                    5
+                );
+            }
         }
         const insertImage = async () => {
             if (!referenceImageLimit) {

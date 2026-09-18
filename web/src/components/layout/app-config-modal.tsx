@@ -336,7 +336,18 @@ export function AppConfigModal() {
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         {modelGroups.map((group) => (
-                            <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-4">
+                            <Form.Item
+                                key={group.modelKey}
+                                label={
+                                    <div className="flex items-center justify-between gap-1 w-full">
+                                        <span>{group.defaultLabel}</span>
+                                        {group.capability === "audio" && modelConfig.audioModels.length === 0 && (
+                                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-normal">（中转站未配置）</span>
+                                        )}
+                                    </div>
+                                }
+                                className="mb-4"
+                            >
                                 <ConfigModelInput
                                     config={modelConfig}
                                     value={modelConfig[group.modelKey]}
@@ -346,7 +357,7 @@ export function AppConfigModal() {
                                         if (channelId) updateConfig(group.channelKey, channelId);
                                     }}
                                     capability={group.capability}
-                                    placeholder="输入模型名或下拉选择"
+                                    placeholder={group.capability === "audio" && modelConfig.audioModels.length === 0 ? "未配置官方音频模型" : "输入模型名或下拉选择"}
                                 />
                             </Form.Item>
                         ))}

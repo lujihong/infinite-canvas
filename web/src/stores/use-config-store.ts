@@ -102,7 +102,7 @@ export const defaultConfig: AiConfig = {
     imageModel: "gpt-image-2-1k",
     videoModel: "sd4-seedance-2.0-fast",
     textModel: "gpt-5.6-sol",
-    audioModel: "gpt-4o-mini-tts",
+    audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -207,7 +207,7 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
         const fallbackModel = validDefault(config.model, textModels) || fallbackTextModel;
         const fallbackImageModel = validDefault(config.imageModel, imageModels) || preferredModel(imageModels, isImageModelName) || defaultConfig.imageModel;
         const fallbackVideoModel = validDefault(config.videoModel, videoModels) || preferredModel(videoModels, isVideoModelName) || defaultConfig.videoModel;
-        const fallbackAudioModel = validDefault(config.audioModel, audioModels) || preferredModel(audioModels, isAudioModelName) || defaultConfig.audioModel;
+        const fallbackAudioModel = validDefault(config.audioModel, audioModels) || preferredModel(audioModels, isAudioModelName) || (audioModels[0] || "");
 
         return {
             ...config,
@@ -237,7 +237,7 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
     const fallbackModel = validDefault(modelChannel.defaultModel, textModels) || fallbackTextModel;
     const fallbackImageModel = validDefault(modelChannel.defaultImageModel, imageModels) || preferredModel(imageModels, isImageModelName);
     const fallbackVideoModel = validDefault(modelChannel.defaultVideoModel, videoModels) || preferredModel(videoModels, isVideoModelName);
-    const fallbackAudioModel = preferredModel(audioModels, isAudioModelName) || config.audioModel || defaultConfig.audioModel;
+    const fallbackAudioModel = preferredModel(audioModels, isAudioModelName) || (audioModels[0] || "");
     return {
         ...config,
         channelMode,
@@ -252,7 +252,7 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
         textModel: textModels.includes(config.textModel) ? config.textModel : fallbackTextModel || fallbackModel,
         audioModel: audioModels.length > 0
             ? (audioModels.includes(config.audioModel) ? config.audioModel : fallbackAudioModel)
-            : (config.audioModel || fallbackAudioModel),
+            : "",
         systemPrompt: modelChannel.systemPrompt,
         publicChannels: modelChannel.channels || [],
     };
@@ -355,7 +355,24 @@ function isImageModelName(model: string) {
 
 function isAudioModelName(model: string) {
     const value = model.toLowerCase();
-    return value.includes("audio") || value.includes("tts") || value.includes("speech") || value.includes("voice") || value.includes("music") || value.includes("sound") || value.includes("elevenlabs") || value.includes("suno") || value.includes("lyrics") || value.includes("vocal") || value.includes("midi") || value.includes("wav");
+    return (
+        value.includes("audio") ||
+        value.includes("tts") ||
+        value.includes("speech") ||
+        value.includes("voice") ||
+        value.includes("music") ||
+        value.includes("sound") ||
+        value.includes("elevenlabs") ||
+        value.includes("suno") ||
+        value.includes("lyrics") ||
+        value.includes("vocal") ||
+        value.includes("midi") ||
+        value.includes("wav") ||
+        value.includes("cosyvoice") ||
+        value.includes("chattts") ||
+        value.includes("fish-speech") ||
+        value.includes("index-tts")
+    );
 }
 
 function isTextModelName(model: string) {

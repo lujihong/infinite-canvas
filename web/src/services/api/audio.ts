@@ -7,7 +7,7 @@ import { isMimoPresetTtsModel, isMimoTtsModel, isMimoVoiceCloneModel, isMimoVoic
 import { geminiActionUrl, geminiDirectHeaders, geminiErrorMessage, isGeminiConfig, isGeminiTtsModel } from "@/lib/gemini";
 import { geminiPcmBase64ToWav, normalizeGeminiTtsVoice } from "@/lib/gemini-tts";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useWalletStore } from "@/stores/use-wallet-store";
 import type { ReferenceAudio } from "@/types/media";
@@ -328,7 +328,14 @@ function decodeMiMoAudio(payload: MiMoAudioResponse, format: string) {
 
 function assertAudioConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置音频模型");
-    if (config.channelMode !== "local") return;
+    if (config.channelMode !== "local") {
+        const publicSettings = useConfigStore.getState().publicSettings;
+        const available = publicSettings?.modelChannel?.availableModels || [];
+        if (available.length > 0 && !available.includes(model)) {
+            throw new Error(`当前官方中转平台暂未开通音频模型「${model}」，请联系管理员在中转站配置音频渠道，或切换至本地私有渠道`);
+        }
+        return;
+    }
     if (!isMimoTtsModel(model) && !isGeminiConfig(config, model)) {
         if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
         if (!config.apiKey.trim()) throw new Error("请先配置 API Key");

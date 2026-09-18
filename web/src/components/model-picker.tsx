@@ -158,15 +158,6 @@ export function ModelPicker({
             return filterModelsByCapability([item.model], capability, item.protocol || "").length > 0;
         });
         if (matched.length > 0) return matched;
-        if (capability === "audio") {
-            return RECOMMENDED_AUDIO_MODELS.map((modelName) => ({
-                key: `recommended-audio::${modelName}`,
-                channelId: "recommended-audio",
-                channelName: "常用语音合成/TTS",
-                protocol: "openai",
-                model: modelName,
-            }));
-        }
         return [];
     }, [allOptions, capability, personalPricing.items]);
 
@@ -350,8 +341,10 @@ export function ModelPicker({
                         );
                     })
                 ) : !isCustomCandidate ? (
-                    <div className="py-6 text-center text-xs text-stone-400">
-                        暂无匹配模型，可直接在上方输入自定义模型
+                    <div className="py-6 px-3 text-center text-xs text-stone-400 dark:text-stone-500">
+                        {capability === "audio"
+                            ? "中转平台暂未开通官方语音合成通道，可配置本地私有渠道或直接在上方输入自定义模型"
+                            : "暂无匹配模型，可直接在上方输入自定义模型"}
                     </div>
                 ) : null}
             </div>

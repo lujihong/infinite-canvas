@@ -140,14 +140,6 @@ export function ConfigModelInput({
             return filterModelsByCapability([item.model], capability, item.protocol || "").length > 0;
         });
         if (matched.length > 0) return matched;
-        if (capability === "audio") {
-            return RECOMMENDED_AUDIO_MODELS.map((modelName) => ({
-                channelId: "recommended-audio",
-                channelName: "常用语音合成/TTS",
-                protocol: "openai",
-                model: modelName,
-            }));
-        }
         return [];
     }, [allModels, capability, personalPricing.items]);
 
@@ -234,8 +226,10 @@ export function ConfigModelInput({
                 value: "",
                 disabled: true,
                 label: (
-                    <div className="py-2.5 px-2 text-center text-xs text-stone-400">
-                        当前通道暂无对应模型，请在上方输入自定义模型名称
+                    <div className="py-3 px-2 text-center text-xs text-stone-400 dark:text-stone-500">
+                        {capability === "audio"
+                            ? "中转平台暂未开通官方语音合成通道，可在设置中配置本地私有渠道"
+                            : "当前通道暂无对应可用模型，可直接在上方输入自定义模型名称"}
                     </div>
                 ),
             });
