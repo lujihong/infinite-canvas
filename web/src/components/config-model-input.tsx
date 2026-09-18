@@ -6,7 +6,7 @@ import { Check, ChevronDown, Cpu, Sparkles, Zap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { RECOMMENDED_AUDIO_MODELS } from "@/lib/audio-generation";
-import { getModelPricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
+import { getModelPricing, loadRemotePricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
 import {
     filterModelsByCapability,
     normalizeLocalChannels,
@@ -41,9 +41,12 @@ export function ConfigModelInput({
     }, [value]);
 
     const publicSettings = useConfigStore((state) => state.publicSettings);
+    const loadPublicSettings = useConfigStore((state) => state.loadPublicSettings);
     const availablePlatformModels = useMemo(() => {
-        return publicSettings?.modelChannel?.availableModels || [];
-    }, [publicSettings]);
+        const publicList = publicSettings?.modelChannel?.availableModels || [];
+        const personalList = Array.from(personalPricing.items.keys());
+        return normalizeModelList([...publicList, ...personalList]);
+    }, [publicSettings, personalPricing.items]);
 
     const channels = useMemo(() => {
         const rawChannels = config.channelMode === "remote"
@@ -125,9 +128,17 @@ export function ConfigModelInput({
 
     const filteredModels = useMemo(() => {
         if (!capability) return allModels;
-        const matched = allModels.filter(
-            (item) => filterModelsByCapability([item.model], capability, item.protocol || "").length > 0
-        );
+        const matched = allModels.filter((item) => {
+            const pricingItem = personalPricing.items.get(item.model);
+            if (pricingItem && Array.isArray(pricingItem.supported_endpoint_types) && pricingItem.supported_endpoint_types.length > 0) {
+                const types = pricingItem.supported_endpoint_types.map((t) => t.toLowerCase());
+                if (capability === "video" && (types.includes("video") || types.includes("videos"))) return true;
+                if (capability === "image" && (types.includes("image") || types.includes("images"))) return true;
+                if (capability === "audio" && (types.includes("audio") || types.includes("tts") || types.includes("speech") || types.includes("voice"))) return true;
+                if (capability === "text" && (types.includes("chat") || types.includes("completions"))) return true;
+            }
+            return filterModelsByCapability([item.model], capability, item.protocol || "").length > 0;
+        });
         if (matched.length > 0) return matched;
         if (capability === "audio") {
             return RECOMMENDED_AUDIO_MODELS.map((modelName) => ({
@@ -138,7 +149,7 @@ export function ConfigModelInput({
             }));
         }
         return [];
-    }, [allModels, capability]);
+    }, [allModels, capability, personalPricing.items]);
 
     // 智能构建 AutoComplete 下拉选项（两行优雅排版，自动换行）
     const options = useMemo(() => {
@@ -299,8 +310,10 @@ export function ConfigModelInput({
                 placeholder={placeholder}
                 allowClear
                 onFocus={(e) => {
-                    // 聚焦时自动全选，用户若要搜索一键打字即换，若要选择则直接在下拉中点选全部模型
+                    // 聚焦时自动全选，并后台静默拉取中转站最新模型与本人报价
                     e.target.select();
+                    void loadPublicSettings();
+                    void loadRemotePricing();
                 }}
                 onPressEnter={() => applyModel(inputValue)}
             />

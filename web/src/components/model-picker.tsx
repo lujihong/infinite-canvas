@@ -6,7 +6,7 @@ import { Popover } from "antd";
 
 import { cn } from "@/lib/utils";
 import { RECOMMENDED_AUDIO_MODELS } from "@/lib/audio-generation";
-import { getModelPricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
+import { getModelPricing, loadRemotePricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
 import {
     filterModelsByCapability,
     normalizeLocalChannels,
@@ -46,9 +46,12 @@ export function ModelPicker({
     const inputRef = useRef<HTMLInputElement>(null);
 
     const publicSettings = useConfigStore((state) => state.publicSettings);
+    const loadPublicSettings = useConfigStore((state) => state.loadPublicSettings);
     const availablePlatformModels = useMemo(() => {
-        return publicSettings?.modelChannel?.availableModels || [];
-    }, [publicSettings]);
+        const publicList = publicSettings?.modelChannel?.availableModels || [];
+        const personalList = Array.from(personalPricing.items.keys());
+        return normalizeModelList([...publicList, ...personalList]);
+    }, [publicSettings, personalPricing.items]);
 
     const channels = useMemo(() => {
         const rawChannels = config.channelMode === "remote"
@@ -143,9 +146,17 @@ export function ModelPicker({
     // 经 capability 过滤后的选项
     const filteredOptions = useMemo(() => {
         if (!capability) return allOptions;
-        const matched = allOptions.filter(
-            (item) => filterModelsByCapability([item.model], capability, item.protocol || "").length > 0
-        );
+        const matched = allOptions.filter((item) => {
+            const pricingItem = personalPricing.items.get(item.model);
+            if (pricingItem && Array.isArray(pricingItem.supported_endpoint_types) && pricingItem.supported_endpoint_types.length > 0) {
+                const types = pricingItem.supported_endpoint_types.map((t) => t.toLowerCase());
+                if (capability === "video" && (types.includes("video") || types.includes("videos"))) return true;
+                if (capability === "image" && (types.includes("image") || types.includes("images"))) return true;
+                if (capability === "audio" && (types.includes("audio") || types.includes("tts") || types.includes("speech") || types.includes("voice"))) return true;
+                if (capability === "text" && (types.includes("chat") || types.includes("completions"))) return true;
+            }
+            return filterModelsByCapability([item.model], capability, item.protocol || "").length > 0;
+        });
         if (matched.length > 0) return matched;
         if (capability === "audio") {
             return RECOMMENDED_AUDIO_MODELS.map((modelName) => ({
@@ -157,7 +168,7 @@ export function ModelPicker({
             }));
         }
         return [];
-    }, [allOptions, capability]);
+    }, [allOptions, capability, personalPricing.items]);
 
     // 当前选中的选项信息
     const currentOption = useMemo(() => {
@@ -210,11 +221,13 @@ export function ModelPicker({
 
     useEffect(() => {
         if (open) {
+            void loadPublicSettings();
+            void loadRemotePricing();
             setTimeout(() => inputRef.current?.focus(), 50);
         } else {
             setSearchKeyword("");
         }
-    }, [open]);
+    }, [open, loadPublicSettings]);
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {

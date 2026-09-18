@@ -9,6 +9,7 @@ import { ConfigModelInput } from "@/components/config-model-input";
 import { GrokTtsVoiceSelect } from "@/components/grok-tts-voice-select";
 import { ModelPicker } from "@/components/model-picker";
 import { fetchImageModels } from "@/services/api/image";
+import { loadRemotePricing } from "@/services/api/pricing";
 import { fetchUserConfig, measureUserStorageProvider, syncUserModelConfig, syncUserStorageProvider } from "@/services/api/user-config";
 import { clearStorageConfigCache as clearFileStorageCache } from "@/services/file-storage";
 import { clearStorageConfigCache as clearImageStorageCache, defaultUserStorageProvider, defaultUserWebDAVStorageProvider, loadStorageConfig, loadUserS3StorageProvider, loadUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider, type UserStorageProvider } from "@/services/image-storage";
@@ -57,6 +58,7 @@ export function AppConfigModal() {
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
     const publicSettings = useConfigStore((state) => state.publicSettings);
+    const loadPublicSettings = useConfigStore((state) => state.loadPublicSettings);
     const token = useUserStore((state) => state.token);
     const user = useUserStore((state) => state.user);
     const isAdmin = user?.role === "admin";
@@ -74,6 +76,13 @@ export function AppConfigModal() {
     const grokTts = isGrok2APITtsConfig({ ...modelConfig, model: config.audioModel, audioModel: config.audioModel }, config.audioModel);
     const geminiTts = isGeminiTtsModel(config.audioModel) && isGeminiConfig({ ...modelConfig, model: config.audioModel, audioModel: config.audioModel }, config.audioModel);
     const modelSelectChannel = normalizeLocalChannels(config).find((channel) => channel.id === modelSelectChannelId);
+
+    useEffect(() => {
+        if (isConfigOpen) {
+            void loadPublicSettings();
+            void loadRemotePricing();
+        }
+    }, [isConfigOpen, loadPublicSettings]);
 
     useEffect(() => {
         setUserStorage(loadUserS3StorageProvider() || defaultUserStorageProvider());
@@ -316,7 +325,7 @@ export function AppConfigModal() {
                                     <span className="font-bold text-sm text-stone-900 dark:text-stone-100">鑫元宝官方模型服务已就绪</span>
                                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
                                         <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                        已自动绑定 · 可用 {modelChannel?.availableModels.length || 53} 个模型
+                                        已自动绑定 · 可用 {modelChannel?.availableModels?.length ?? 0} 个模型
                                     </span>
                                 </div>
                                 <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
