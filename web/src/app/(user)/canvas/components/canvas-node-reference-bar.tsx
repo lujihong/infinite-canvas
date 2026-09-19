@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Image as ImageIcon, Music2, Plus, Video, X } from "lucide-react";
+import { FileText, FolderPlus, Image as ImageIcon, Music2, Plus, ShieldCheck, Video, X } from "lucide-react";
 import { Popover } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -8,17 +8,76 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { buildAllCanvasResourceReferences, type CanvasResourceReference } from "../utils/canvas-resource-references";
 import type { CanvasNodeData } from "../types";
 
-export function CanvasNodeReferenceBar({ nodeId, connectedNodes, onDisconnect, onStartSelection }: { nodeId: string; connectedNodes: CanvasNodeData[]; onDisconnect?: (fromNodeId: string, toNodeId: string) => void; onStartSelection?: (nodeId: string) => void }) {
+export function CanvasNodeReferenceBar({
+    nodeId,
+    connectedNodes,
+    onDisconnect,
+    onStartSelection,
+    onOpenAiccPicker,
+    onOpenMyAssetsPicker,
+}: {
+    nodeId: string;
+    connectedNodes: CanvasNodeData[];
+    onDisconnect?: (fromNodeId: string, toNodeId: string) => void;
+    onStartSelection?: (nodeId: string) => void;
+    onOpenAiccPicker?: (nodeId: string) => void;
+    onOpenMyAssetsPicker?: (nodeId: string) => void;
+}) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const references = buildAllCanvasResourceReferences(connectedNodes);
+
+    const addReferenceMenu = (
+        <div className="flex flex-col gap-1 p-1 min-w-[200px] text-xs" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="px-2.5 py-1 text-[11px] font-medium text-stone-400 border-b border-stone-200/50 dark:border-stone-700/50">添加参考内容</div>
+            {onOpenAiccPicker ? (
+                <button
+                    type="button"
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800 text-left transition cursor-pointer text-cyan-600 dark:text-cyan-400 font-medium"
+                    onClick={() => onOpenAiccPicker(nodeId)}
+                >
+                    <ShieldCheck className="size-4 shrink-0 text-cyan-500" />
+                    <span>从真人素材库选用 (AICC)</span>
+                </button>
+            ) : null}
+            {onOpenMyAssetsPicker ? (
+                <button
+                    type="button"
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800 text-left transition cursor-pointer text-stone-700 dark:text-stone-200"
+                    onClick={() => onOpenMyAssetsPicker(nodeId)}
+                >
+                    <FolderPlus className="size-4 shrink-0 text-amber-500" />
+                    <span>从我的素材库选用</span>
+                </button>
+            ) : null}
+            {onStartSelection ? (
+                <button
+                    type="button"
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800 text-left transition cursor-pointer text-stone-600 dark:text-stone-300"
+                    onClick={() => onStartSelection(nodeId)}
+                >
+                    <Plus className="size-4 shrink-0 text-stone-400" />
+                    <span>从画布节点选择连线</span>
+                </button>
+            ) : null}
+        </div>
+    );
+
     return (
         <div className="mb-2">
             <div className="mb-1.5 text-[11px] font-medium" style={{ color: theme.node.muted }}>参考内容</div>
             <div className="thin-scrollbar flex min-h-12 gap-2 overflow-x-auto pb-1">
                 {references.map((reference) => <ReferenceItem key={reference.id} reference={reference} onRemove={() => onDisconnect?.(reference.nodeId, nodeId)} />)}
-                <button type="button" className="grid size-12 shrink-0 place-items-center rounded-xl border bg-transparent transition hover:opacity-70" style={{ borderColor: theme.toolbar.border, color: theme.node.muted }} title="从画布选择参考节点" onClick={() => onStartSelection?.(nodeId)}>
-                    <Plus className="size-4" />
-                </button>
+                <Popover
+                    content={addReferenceMenu}
+                    trigger="click"
+                    placement="top"
+                    destroyTooltipOnHide
+                    overlayClassName="z-[1250]"
+                >
+                    <button type="button" className="grid size-12 shrink-0 place-items-center rounded-xl border bg-transparent transition hover:opacity-70 cursor-pointer" style={{ borderColor: theme.toolbar.border, color: theme.node.muted }} title="添加参考内容">
+                        <Plus className="size-4" />
+                    </button>
+                </Popover>
             </div>
         </div>
     );

@@ -308,6 +308,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInsertPositionRef = useRef<Position | null>(null);
+    const replacingNodeIdRef = useRef<string | null>(null);
+    const referenceTargetNodeIdRef = useRef<string | null>(null);
     const draggedAssetPayloadRef = useRef<InsertAssetPayload | null>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
@@ -3980,14 +3982,127 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             message.error(error instanceof Error ? error.message : "首页素材插入失败");
         });
     }, [getCanvasCenter, message, projectId, projectLoaded, updateProject]);
+    const handleReplaceMedia = useCallback(
+        (node: CanvasNodeData, source: "aicc" | "my-assets" | "local") => {
+            if (source === "local") {
+                handleUploadRequest(node.id);
+                return;
+            }
+            replacingNodeIdRef.current = node.id;
+            referenceTargetNodeIdRef.current = null;
+            assetInsertPositionRef.current = null;
+            setAssetPickerTab(source === "aicc" ? "aicc" : "my-assets");
+            setAssetPickerOpen(true);
+        },
+        [handleUploadRequest],
+    );
+
+    const handleOpenAiccForReference = useCallback((nodeId: string) => {
+        referenceTargetNodeIdRef.current = nodeId;
+        replacingNodeIdRef.current = null;
+        assetInsertPositionRef.current = null;
+        setAssetPickerTab("aicc");
+        setAssetPickerOpen(true);
+    }, []);
+
+    const handleOpenMyAssetsForReference = useCallback((nodeId: string) => {
+        referenceTargetNodeIdRef.current = nodeId;
+        replacingNodeIdRef.current = null;
+        assetInsertPositionRef.current = null;
+        setAssetPickerTab("my-assets");
+        setAssetPickerOpen(true);
+    }, []);
+
     const handleAssetInsert = useCallback(
         (payload: InsertAssetPayload) => {
+            const replacingNodeId = replacingNodeIdRef.current;
+            const referenceTargetNodeId = referenceTargetNodeIdRef.current;
+            replacingNodeIdRef.current = null;
+            referenceTargetNodeIdRef.current = null;
+            const aiccUri = "aiccUri" in payload ? payload.aiccUri : undefined;
+            const mimeType = "mimeType" in payload ? payload.mimeType : undefined;
+
+            // 1. 替换现有节点逻辑
+            if (replacingNodeId) {
+                setAssetPickerOpen(false);
+                const targetNode = nodesRef.current.find((n) => n.id === replacingNodeId);
+                if (!targetNode) return;
+
+                const nextPreview = payload.kind === "image" ? payload.dataUrl : (payload.kind === "video" || payload.kind === "audio" ? payload.url : payload.content);
+                const nextType = payload.kind === "image"
+                    ? (isPanoramaNodeType(targetNode.type) ? CanvasNodeType.Panorama : CanvasNodeType.Image)
+                    : payload.kind === "video"
+                        ? CanvasNodeType.Video
+                        : payload.kind === "audio"
+                            ? CanvasNodeType.Audio
+                            : targetNode.type;
+
+                setNodes((prev) =>
+                    prev.map((node) => {
+                        if (node.id !== replacingNodeId) return node;
+                        return {
+                            ...node,
+                            type: nextType,
+                            title: payload.title || node.title,
+                            metadata: {
+                                ...node.metadata,
+                                content: nextPreview,
+                                aiccUri,
+                                mimeType: mimeType || (payload.kind === "image" ? "image/jpeg" : payload.kind === "video" ? "video/mp4" : "audio/mpeg"),
+                                status: NODE_STATUS_SUCCESS,
+                                errorDetails: undefined,
+                            },
+                        };
+                    }),
+                );
+                message.success(aiccUri ? "已成功替换为移动云已认证的真人素材" : "已成功替换素材");
+                return;
+            }
+
+            // 2. 作为参考内容添加到目标节点（自动在左侧新建素材节点并连线）
+            if (referenceTargetNodeId) {
+                setAssetPickerOpen(false);
+                const targetNode = nodesRef.current.find((n) => n.id === referenceTargetNodeId);
+                if (!targetNode) return;
+
+                const type = payload.kind === "image" ? CanvasNodeType.Image : payload.kind === "video" ? CanvasNodeType.Video : CanvasNodeType.Audio;
+                const spec = NODE_DEFAULT_SIZE[type];
+                const newAssetId = aiccUri ? `aicc-${Date.now()}-${nanoid()}` : `ref-${Date.now()}-${nanoid()}`;
+                const preview = payload.kind === "image" ? payload.dataUrl : (payload.kind === "video" || payload.kind === "audio" ? payload.url : payload.content);
+
+                const newPos = {
+                    x: targetNode.position.x - spec.width - 96,
+                    y: targetNode.position.y + (targetNode.height - spec.height) / 2,
+                };
+
+                const newAssetNode: CanvasNodeData = {
+                    id: newAssetId,
+                    type,
+                    title: payload.title || (aiccUri ? "已认证真人素材" : "参考素材"),
+                    position: newPos,
+                    width: spec.width,
+                    height: spec.height,
+                    metadata: {
+                        content: preview,
+                        aiccUri,
+                        status: NODE_STATUS_SUCCESS,
+                        mimeType,
+                    },
+                };
+
+                setNodes((prev) => [...prev, newAssetNode]);
+                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: newAssetId, toNodeId: referenceTargetNodeId }]);
+                message.success(aiccUri ? "已添加真人素材并自动关联为参考内容" : "已添加参考素材并自动关联连线");
+                return;
+            }
+
+            // 3. 普通插入逻辑
             const position = assetInsertPositionRef.current || undefined;
             assetInsertPositionRef.current = null;
             void insertAssetAtRef.current(payload, position);
             setAssetPickerOpen(false);
         },
-        [],
+        [message],
     );
 
     const focusNode = useCallback(
@@ -4184,6 +4299,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         onGenerate={handleGenerateNode}
                                         onDisconnectReference={disconnectNodeReference}
                                         onStartReferenceSelection={startNodeReferenceSelection}
+                                        onOpenAiccPicker={handleOpenAiccForReference}
+                                        onOpenMyAssetsPicker={handleOpenMyAssetsForReference}
                                         onImageSettingsOpenChange={(open) => {
                                             setNodeImageSettingsOpen(open);
                                             if (open) setToolbarNodeId(null);
@@ -4225,6 +4342,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}
                             onRetry={(node) => void handleRetryNode(node)}
+                            onReplaceAicc={(node) => handleReplaceMedia(node, "aicc")}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
                             onSelectReference={selectNodeReference}
                             onContextMenu={(event, id) => {
@@ -4298,6 +4416,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onToggleDialog={(node) => setDialogNodeId((current) => (current === node.id ? null : node.id))}
                     onGenerateImage={generateImageFromTextNode}
                     onUpload={(node) => handleUploadRequest(node.id)}
+                    onReplaceMedia={handleReplaceMedia}
                     onDownload={downloadNodeImage}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
                     onUploadMediaToCloud={(node) => void uploadNodeMediaToCloud(node)}
@@ -4528,7 +4647,18 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     <p className="text-sm opacity-60">这会删除当前画布上的所有节点和连线。</p>
                 </Modal>
 
-                <AssetPickerModal allowAicc open={assetPickerOpen} defaultTab={assetPickerTab} onInsert={handleAssetInsert} onClose={() => { assetInsertPositionRef.current = null; setAssetPickerOpen(false); }} />
+                <AssetPickerModal
+                    allowAicc
+                    open={assetPickerOpen}
+                    defaultTab={assetPickerTab}
+                    onInsert={handleAssetInsert}
+                    onClose={() => {
+                        assetInsertPositionRef.current = null;
+                        replacingNodeIdRef.current = null;
+                        referenceTargetNodeIdRef.current = null;
+                        setAssetPickerOpen(false);
+                    }}
+                />
             </section>
             {assistantMounted ? (
                 <CanvasAssistantPanel

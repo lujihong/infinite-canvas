@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChevronRight, Image as ImageIcon, Maximize2, Music2, Pause, Play, RefreshCw, Star, Video } from "lucide-react";
+import { ChevronRight, FolderPlus, Image as ImageIcon, Maximize2, Music2, Pause, Play, RefreshCw, ShieldCheck, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
@@ -51,6 +51,7 @@ type CanvasNodeProps = {
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
+    onReplaceAicc?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onSelectReference?: (nodeId: string) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
@@ -73,6 +74,7 @@ type NodeContentRendererProps = {
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
+    onReplaceAicc?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
@@ -112,6 +114,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onToggleBatch,
     onSetBatchPrimary,
     onRetry,
+    onReplaceAicc,
     onViewImage,
     onSelectReference,
     onContextMenu,
@@ -306,7 +309,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
         >
             {!referenceSelectionState ? <div
-                className="absolute left-3 top-[-28px] z-[65] max-w-[calc(100%-24px)]"
+                className="absolute left-3 top-[-28px] z-[65] max-w-[calc(100%-24px)] flex items-center gap-2"
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >
@@ -341,6 +344,15 @@ export const CanvasNode = React.memo(function CanvasNode({
                         {data.title || "未命名节点"}
                     </button>
                 )}
+                {data.metadata?.aiccUri ? (
+                    <span
+                        className="inline-flex items-center gap-1 shrink-0 rounded-full bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 text-[10px] font-medium text-cyan-600 dark:text-cyan-400"
+                        title={`移动云已认证真人素材 (${data.metadata.aiccUri})`}
+                    >
+                        <ShieldCheck className="size-3" />
+                        移动云已认证
+                    </span>
+                ) : null}
             </div> : null}
             {isGroup && !referenceSelectionState ? (
                 <div className="pointer-events-none absolute right-3 top-[-28px] z-[65] text-xs opacity-75" style={{ color: theme.node.text }}>
@@ -410,6 +422,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                             onContentChange={onContentChange}
                             onStopEditing={() => setIsEditingContent(false)}
                             onRetry={onRetry}
+                            onReplaceAicc={onReplaceAicc}
                             onViewImage={onViewImage}
                             onToggleBatch={() => onToggleBatch?.(data.id)}
                             onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
@@ -453,7 +466,7 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement | null
     }
     if (props.isBatchRoot) return props.node.type === CanvasNodeType.Panorama ? <PanoramaNodeContent {...props} /> : <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading" && (props.node.type !== CanvasNodeType.Text || !props.node.metadata.content)) return <LoadingContent node={props.node} theme={props.theme} now={props.now} />;
-    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
+    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onReplaceAicc={props.onReplaceAicc} />;
 
     const Renderer = nodeContentRenderers[props.node.type];
     return (Renderer ? <Renderer {...props} /> : <UnknownNodeContent theme={props.theme} />) as React.ReactElement | null;
@@ -523,23 +536,54 @@ function LoadingContent({ node, theme, now }: Pick<NodeContentRendererProps, "no
     );
 }
 
-function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
+function ErrorContent({ node, theme, onRetry, onReplaceAicc }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry" | "onReplaceAicc">) {
+    const errorDetails = node.metadata?.errorDetails || "";
+    const isPrivacyRealPerson = errorDetails.includes("PrivacyInformation") || errorDetails.includes("real person") || errorDetails.includes("InputImageSensitiveContentDetected");
+
     return (
-        <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
-            <button
-                type="button"
-                className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
-                style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onRetry?.(node);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                <RefreshCw className="size-3.5" />
-                重试
-            </button>
+        <div className="flex max-w-[280px] flex-col items-center gap-3 px-4 text-center">
+            {isPrivacyRealPerson ? (
+                <div className="flex flex-col items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 text-[10px] font-bold text-amber-500">
+                        🛡️ 移动云真人合规拦截
+                    </span>
+                    <p className="text-xs leading-relaxed text-stone-200">
+                        参考素材包含未经授权的真人肖像。<br />
+                        <span className="text-[11px] text-stone-400">Seedance 2.0 合规要求必须使用在「人物素材库」中已认证的真人素材。</span>
+                    </p>
+                </div>
+            ) : (
+                <div className="text-xs leading-5 text-red-300 break-words">{errorDetails || "生成失败"}</div>
+            )}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+                {isPrivacyRealPerson && onReplaceAicc ? (
+                    <button
+                        type="button"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-full bg-amber-500 hover:bg-amber-600 px-3 text-xs font-semibold text-stone-950 shadow-md transition hover:scale-[1.02] cursor-pointer"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onReplaceAicc(node);
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                    >
+                        <FolderPlus className="size-3.5" />
+                        选择已认证真人素材
+                    </button>
+                ) : null}
+                <button
+                    type="button"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02] cursor-pointer"
+                    style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onRetry?.(node);
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                >
+                    <RefreshCw className="size-3.5" />
+                    重试
+                </button>
+            </div>
         </div>
     );
 }

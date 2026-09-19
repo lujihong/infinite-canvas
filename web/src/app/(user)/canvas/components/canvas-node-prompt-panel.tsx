@@ -35,12 +35,14 @@ type CanvasNodePromptPanelProps = {
     connectedNodes?: CanvasNodeData[];
     onDisconnectReference?: (fromNodeId: string, toNodeId: string) => void;
     onStartReferenceSelection?: (nodeId: string) => void;
+    onOpenAiccPicker?: (nodeId: string) => void;
+    onOpenMyAssetsPicker?: (nodeId: string) => void;
     videoFrameOptions?: CanvasVideoFrameOption[];
     videoResourceOptions?: CanvasVideoResourceOption[];
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onOpenAiccPicker, onOpenMyAssetsPicker, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     usePersonalPricing();
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
@@ -83,7 +85,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
-            <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
+            <CanvasNodeReferenceBar
+                nodeId={node.id}
+                connectedNodes={connectedNodes}
+                onDisconnect={onDisconnectReference}
+                onStartSelection={onStartReferenceSelection}
+                onOpenAiccPicker={onOpenAiccPicker}
+                onOpenMyAssetsPicker={onOpenMyAssetsPicker}
+            />
             <CanvasPromptChipInput
                 value={prompt}
                 references={mentionReferences}
@@ -150,7 +159,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             </div>
             <Modal title="编辑提示词" open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
-                    <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); onStartReferenceSelection?.(nodeId); }} />
+                    <CanvasNodeReferenceBar
+                        nodeId={node.id}
+                        connectedNodes={connectedNodes}
+                        onDisconnect={onDisconnectReference}
+                        onStartSelection={(nodeId) => { setExpanded(false); onStartReferenceSelection?.(nodeId); }}
+                        onOpenAiccPicker={(nodeId) => { setExpanded(false); onOpenAiccPicker?.(nodeId); }}
+                        onOpenMyAssetsPicker={(nodeId) => { setExpanded(false); onOpenMyAssetsPicker?.(nodeId); }}
+                    />
                     <CanvasPromptChipInput
                         value={prompt}
                         references={mentionReferences}

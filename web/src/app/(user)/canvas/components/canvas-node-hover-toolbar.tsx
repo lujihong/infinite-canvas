@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Upload, Video } from "lucide-react";
+import { App, Modal, Popover, Segmented, Tooltip } from "antd";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, ShieldCheck, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -25,6 +25,7 @@ type CanvasNodeHoverToolbarProps = {
     onToggleDialog: (node: CanvasNodeData) => void;
     onGenerateImage: (node: CanvasNodeData) => void;
     onUpload: (node: CanvasNodeData) => void;
+    onReplaceMedia?: (node: CanvasNodeData, source: "aicc" | "my-assets" | "local") => void;
     onDownload: (node: CanvasNodeData) => void;
     onSaveAsset: (node: CanvasNodeData) => void;
     onUploadMediaToCloud: (node: CanvasNodeData) => void;
@@ -51,6 +52,7 @@ type ToolbarTool = {
     onClick: () => void;
     active?: boolean;
     danger?: boolean;
+    menuContent?: ReactNode;
 };
 
 export function CanvasNodeHoverToolbar({
@@ -64,6 +66,7 @@ export function CanvasNodeHoverToolbar({
     onToggleDialog,
     onGenerateImage,
     onUpload,
+    onReplaceMedia,
     onDownload,
     onSaveAsset,
     onUploadMediaToCloud,
@@ -153,6 +156,36 @@ export function CanvasNodeHoverToolbar({
         setImageToolSettingsOpen(true);
     }
 
+    const buildReplaceMenu = (isVid: boolean) => (
+        <div className="flex flex-col gap-1 p-1 min-w-[200px] text-xs bg-[#242424] text-stone-200 rounded-lg shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="px-2.5 py-1 text-[11px] font-medium text-stone-400 border-b border-white/10">选择替换媒体来源</div>
+            <button
+                type="button"
+                className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-cyan-400 font-medium"
+                onClick={() => onReplaceMedia ? onReplaceMedia(node, "aicc") : onUpload(node)}
+            >
+                <ShieldCheck className="size-4 shrink-0 text-cyan-400" />
+                <span>{isVid ? "从真人视频库选择 (AICC)" : "从真人素材库选择 (AICC)"}</span>
+            </button>
+            <button
+                type="button"
+                className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-stone-200"
+                onClick={() => onReplaceMedia ? onReplaceMedia(node, "my-assets") : onUpload(node)}
+            >
+                <FolderPlus className="size-4 shrink-0 text-amber-400" />
+                <span>从我的素材库选择</span>
+            </button>
+            <button
+                type="button"
+                className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-stone-300"
+                onClick={() => onReplaceMedia ? onReplaceMedia(node, "local") : onUpload(node)}
+            >
+                <Upload className="size-4 shrink-0 text-stone-400" />
+                <span>从本地文件上传</span>
+            </button>
+        </div>
+    );
+
     const baseToolbarTools: ToolbarTool[] = [
         { id: "info", title: "查看节点信息", label: "信息", icon: <Info className="size-4" />, onClick: () => onInfo(node) },
         { id: "delete", title: "移除节点", label: "删除", icon: <Trash2 className="size-4" />, onClick: () => onDelete(node), danger: true },
@@ -183,10 +216,10 @@ export function CanvasNodeHoverToolbar({
         ...(isConfig ? [{ id: "config", title: "生成配置", label: "生成配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
         ...(isText ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
-        ...(isImage && !isPanorama && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node) }] : []),
-        ...(isVideo ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node) }] : []),
+        ...(isImage && !isPanorama && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node), menuContent: buildReplaceMenu(false) }] : []),
+        ...(isVideo ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node), menuContent: buildReplaceMenu(true) }] : []),
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
-        ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
+        ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick, menuContent: tool.id === "replace" ? buildReplaceMenu(false) : undefined })) : []),
     ];
     const toolbarTools = hasImage ? [...baseToolbarTools, ...nodeToolbarTools].filter((tool) => tool.id === "uploadImageToCloud" || quickImageToolIdSet.has(tool.id as ImageQuickToolId)) : [...baseToolbarTools, ...nodeToolbarTools];
     const selectableImageToolbarTools = [...baseToolbarTools, ...nodeToolbarTools].filter((tool) => tool.id !== "retry" && tool.id !== "uploadImageToCloud") as ImageToolbarSettingsTool[];
@@ -324,16 +357,39 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     );
 }
 
-function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
+function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false, menuContent }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
+    const actionBtn = (
+        <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap cursor-pointer ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
+            <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-white/10 ${active ? "bg-white/10" : ""}`}>
+                {icon}
+                {hasText ? <span>{label}</span> : null}
+            </span>
+        </button>
+    );
+
+    if (menuContent) {
+        return (
+            <Popover
+                content={menuContent}
+                trigger="click"
+                placement="top"
+                arrow={false}
+                destroyTooltipOnHide
+                overlayClassName="z-[1250]"
+            >
+                <div>
+                    <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff">
+                        {actionBtn}
+                    </Tooltip>
+                </div>
+            </Popover>
+        );
+    }
+
     return (
         <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff">
-            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
-                <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-white/10 ${active ? "bg-white/10" : ""}`}>
-                    {icon}
-                    {hasText ? <span>{label}</span> : null}
-                </span>
-            </button>
+            {actionBtn}
         </Tooltip>
     );
 }
