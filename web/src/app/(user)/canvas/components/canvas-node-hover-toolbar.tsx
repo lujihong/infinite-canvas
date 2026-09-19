@@ -358,10 +358,16 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 }
 
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false, menuContent }: ToolbarTool & { showLabel: boolean }) {
+    const [popoverOpen, setPopoverOpen] = useState(false);
     const hasText = showLabel && Boolean(label);
     const actionBtn = (
-        <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap cursor-pointer ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
-            <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-white/10 ${active ? "bg-white/10" : ""}`}>
+        <button
+            type="button"
+            className={`group relative flex h-12 items-center whitespace-nowrap cursor-pointer ${danger ? "text-[#ef4444]" : ""}`}
+            onClick={menuContent ? undefined : onClick}
+            aria-label={title}
+        >
+            <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-white/10 ${active || popoverOpen ? "bg-white/10" : ""}`}>
                 {icon}
                 {hasText ? <span>{label}</span> : null}
             </span>
@@ -371,15 +377,21 @@ function ToolbarAction({ title, label, icon, onClick, showLabel, active = false,
     if (menuContent) {
         return (
             <Popover
-                content={menuContent}
+                open={popoverOpen}
+                onOpenChange={setPopoverOpen}
+                content={
+                    <div onClick={() => setPopoverOpen(false)}>
+                        {menuContent}
+                    </div>
+                }
                 trigger="click"
                 placement="top"
                 arrow={false}
                 destroyTooltipOnHide
                 overlayClassName="z-[1250]"
             >
-                <div>
-                    <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff">
+                <div className="inline-flex">
+                    <Tooltip title={popoverOpen ? "" : title} placement="top" mouseEnterDelay={0.2} color="#ffffff">
                         {actionBtn}
                     </Tooltip>
                 </div>

@@ -656,7 +656,22 @@ export default function VideoPage() {
             }
         }
         const frameReferencesEnabled = !kling && supportsVideoFrameReferences(modelValue, channelProtocolForConfig({ ...configValue, model: modelValue }));
-        const normalizedConfig = buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue);
+        let normalizedConfig = buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue);
+        const targetAiccChannelId = [
+            firstFrameItem?.aiccChannelId,
+            lastFrameItem?.aiccChannelId,
+            ...referenceItems.map((img) => img.aiccChannelId),
+            ...videoReferenceItems.map((v) => v.aiccChannelId),
+            ...audioReferenceItems.map((a) => a.aiccChannelId),
+        ].find((id): id is number => Boolean(id && id > 0));
+
+        if (targetAiccChannelId) {
+            normalizedConfig = {
+                ...normalizedConfig,
+                videoChannelId: String(targetAiccChannelId),
+                activeChannelId: String(targetAiccChannelId),
+            };
+        }
         if (omni === "reference-to-video" && videoReferenceItems.length) normalizedConfig.videoGenerateAudio = "false";
         const imageReferences = omni === "text-to-video" ? [] : omni === "reference-to-video" ? [...referenceItems] : [...referenceItems].slice(0, kling ? omni === "transformation" ? 4 : 2 : referenceItems.length);
         return { text, model: modelValue, config: normalizedConfig, references: imageReferences, firstFrame: frameReferencesEnabled ? firstFrameItem : null, lastFrame: frameReferencesEnabled ? lastFrameItem : null, videoReferences: acceptsVideoReferences ? [...videoReferenceItems].slice(0, 1) : kling ? [] : [...videoReferenceItems], audioReferences: kling ? [] : [...audioReferenceItems], taskCount: normalizeVideoCount(taskCountValue) };
@@ -818,6 +833,10 @@ export default function VideoPage() {
             if (!aiccSelectionEnabled) {
                 previousModelRef.current = model;
                 updateConfig("videoModel", "doubao-seedance-2.0");
+                if (payload.aiccChannelId) {
+                    updateConfig("videoChannelId", String(payload.aiccChannelId));
+                    updateConfig("activeChannelId", String(payload.aiccChannelId));
+                }
                 message.success(
                     <span>
                         已选用真人肖像素材，自动切换为移动云 Seedance 2.0 模型
@@ -836,6 +855,9 @@ export default function VideoPage() {
                     </span>,
                     5
                 );
+            } else if (payload.aiccChannelId) {
+                updateConfig("videoChannelId", String(payload.aiccChannelId));
+                updateConfig("activeChannelId", String(payload.aiccChannelId));
             }
         }
         const insertImage = async () => {
