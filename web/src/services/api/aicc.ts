@@ -1,11 +1,12 @@
 import axios from "axios";
 import { useUserStore } from "@/stores/use-user-store";
 
-export type AiccGroup = { groupId: string; groupName: string; groupType: "AIGC" | "LivenessFace" };
-export type AiccAsset = { assetId: string; groupId: string; assetName: string; assetType: "Image" | "Video" | "Audio"; assetUrl?: string; status: string };
+export type AiccGroup = { groupId: string; groupName: string; groupType: "AIGC" | "LivenessFace"; channelId?: number };
+export type AiccAsset = { assetId: string; groupId: string; assetName: string; assetType: "Image" | "Video" | "Audio"; assetUrl?: string; status: string; channelId?: number };
 export type AiccPage<T> = { data: T[]; total?: number };
 export type AiccSession = { bytedToken: string; h5Link: string; expiresIn: number };
 export type AiccUpload = { id: string; url: string; assetType: AiccAsset["assetType"]; mimeType: string; bytes: number; expiresAt: number };
+export type AiccChannel = { id: number; name: string; region?: string; models: string[] };
 
 export const AICC_UPLOAD_LIMITS = {
     Image: { maxBytes: 30 * 1024 * 1024, accept: ".jpg,.jpeg,.png,.webp", extensions: /\.(jpe?g|png|webp)$/i, mimeTypes: ["image/jpeg", "image/png", "image/webp"], label: "JPEG / PNG / WebP，最大 30 MiB" },
@@ -40,25 +41,44 @@ function page<T>(value: unknown): AiccPage<T> {
     if (!result.data.every(item => item && typeof item === "object")) throw new Error("素材记录格式异常");
     return { data: result.data, total: typeof result.total === "number" && result.total >= 0 ? result.total : undefined };
 }
-export async function aiccGroups(type: string, pageNo: number, signal?: AbortSignal) {
-    return page<AiccGroup>(await request("asset-groups", "GET", undefined, { groupType: type, pageNo, pageSize: 12 }, signal));
+export async function aiccChannels(signal?: AbortSignal): Promise<AiccChannel[]> {
+    const value = await request("channels", "GET", undefined, undefined, signal);
+    return Array.isArray(value) ? value : [];
 }
-export async function aiccAssets(group: AiccGroup, pageNo: number, signal?: AbortSignal) {
-    return page<AiccAsset>(await request("assets", "GET", undefined, { groupType: group.groupType, groupIds: group.groupId, pageNo, pageSize: 12 }, signal));
+
+export async function aiccGroups(type: string, pageNo: number, channelId?: number, signal?: AbortSignal) {
+    const params: Record<string, unknown> = { groupType: type, pageNo, pageSize: 12 };
+    if (channelId && channelId > 0) params.channel_id = channelId;
+    return page<AiccGroup>(await request("asset-groups", "GET", undefined, params, signal));
 }
-export async function aiccSession(signal?: AbortSignal): Promise<AiccSession> {
-    const value = await request("auth/session", "POST", {}, undefined, signal);
+
+export async function aiccAssets(group: AiccGroup, pageNo: number, channelId?: number, signal?: AbortSignal) {
+    const params: Record<string, unknown> = { groupType: group.groupType, groupIds: group.groupId, pageNo, pageSize: 12 };
+    const effectiveChannelId = channelId || group.channelId;
+    if (effectiveChannelId && effectiveChannelId > 0) params.channel_id = effectiveChannelId;
+    return page<AiccAsset>(await request("assets", "GET", undefined, params, signal));
+}
+
+export async function aiccSession(channelId?: number, signal?: AbortSignal): Promise<AiccSession> {
+    const params = channelId && channelId > 0 ? { channel_id: channelId } : undefined;
+    const value = await request("auth/session", "POST", {}, params, signal);
     if (!value?.bytedToken || !/^https:\/\//.test(value?.h5Link || "") || !Number.isFinite(value.expiresIn) || value.expiresIn <= 0) throw new Error("认证链接格式异常");
     return value;
 }
+
 export async function aiccCheck(token: string, signal?: AbortSignal): Promise<boolean> {
     const value = await request("auth/group", "POST", { bytedToken: token }, undefined, signal);
     return value?.authenticated === true;
 }
-export async function aiccCreateGroup(groupName: string, signal?: AbortSignal) { return request("asset-groups", "POST", { groupName }, undefined, signal); }
+
+export async function aiccCreateGroup(groupName: string, channelId?: number, signal?: AbortSignal) {
+    return request("asset-groups", "POST", { groupName, channelId }, undefined, signal);
+}
+
 export async function aiccCreateAsset(groupId: string, assetName: string, assetUrl: string, assetType: string, signal?: AbortSignal) {
     return request("assets", "POST", { groupId, assetName, assetUrl, assetType }, undefined, signal);
 }
+
 export async function aiccUpload(file: File, groupId: string, assetType: AiccAsset["assetType"], signal?: AbortSignal): Promise<AiccUpload> {
     validateAiccFile(file, assetType);
     const data = new FormData();

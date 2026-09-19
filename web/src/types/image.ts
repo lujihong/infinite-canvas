@@ -6,4 +6,5 @@ export type ReferenceImage = {
     url?: string;
     storageKey?: string;
     aiccUri?: string;
+    aiccChannelId?: number;
 };

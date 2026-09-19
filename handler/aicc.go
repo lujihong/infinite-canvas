@@ -19,6 +19,9 @@ import (
 var aiccPathID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$`)
 
 func validAICCOperation(method, path string) bool {
+	if path == "channels" {
+		return method == http.MethodGet
+	}
 	if path == "auth/session" || path == "auth/group" || path == "uploads" {
 		return method == http.MethodPost
 	}

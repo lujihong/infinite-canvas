@@ -3092,7 +3092,18 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const firstFrame = frameReferencesEnabled ? generationContext.firstFrame : null;
                     const lastFrame = frameReferencesEnabled ? generationContext.lastFrame : null;
                     const videoReferenceImages = frameReferencesEnabled ? generationContext.referenceImages : [...generationContext.referenceImages, ...[generationContext.firstFrame, generationContext.lastFrame].filter((image): image is ReferenceImage => Boolean(image))];
-                    const spec = nodeSizeFromRatio(videoGenerationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
+                    const targetAiccChannelId = [
+                        firstFrame?.aiccChannelId,
+                        lastFrame?.aiccChannelId,
+                        ...videoReferenceImages.map((img) => img.aiccChannelId),
+                        ...generationContext.referenceVideos.map((v) => v.aiccChannelId),
+                        ...generationContext.referenceAudios.map((a) => a.aiccChannelId),
+                    ].find((id): id is number => Boolean(id && id > 0));
+
+                    const effectiveVideoConfig = targetAiccChannelId
+                        ? { ...videoGenerationConfig, videoChannelId: String(targetAiccChannelId), activeChannelId: String(targetAiccChannelId) }
+                        : videoGenerationConfig;
+                    const spec = nodeSizeFromRatio(effectiveVideoConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
                     const clientTaskId = `client_video_task_${videoId}`;
@@ -3104,13 +3115,13 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
                         width: isEmptyVideoNode ? sourceNode.width : spec.width,
                         height: isEmptyVideoNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, cameraControl: sourceNode?.metadata?.cameraControl, status: NODE_STATUS_LOADING, model: videoGenerationConfig.model, channelId: videoGenerationConfig.videoChannelId || videoGenerationConfig.activeChannelId, size: videoGenerationConfig.size, seconds: videoGenerationConfig.videoSeconds, vquality: videoGenerationConfig.vquality, mode: videoGenerationConfig.videoMode, negativePrompt: videoGenerationConfig.videoNegativePrompt, multiShot: videoGenerationConfig.videoMultiShot, shotType: videoGenerationConfig.videoShotType, generateAudio: videoGenerationConfig.videoGenerateAudio, characterOrientation: videoGenerationConfig.videoCharacterOrientation, watermark: videoGenerationConfig.videoWatermark, references: generationReferenceUrls({ ...generationContext, referenceImages: videoReferenceImages, firstFrame, lastFrame }), firstFrameNodeId: sourceNode?.metadata?.firstFrameNodeId, lastFrameNodeId: sourceNode?.metadata?.lastFrameNodeId, klingImageNodeIds: sourceNode?.metadata?.klingImageNodeIds, klingMultiPrompt: sourceNode?.metadata?.klingMultiPrompt, klingElementList: sourceNode?.metadata?.klingElementList, startedAt: generationStartedAt, progress: 0, videoTaskId: clientTaskId },
+                        metadata: { prompt: effectivePrompt, cameraControl: sourceNode?.metadata?.cameraControl, status: NODE_STATUS_LOADING, model: effectiveVideoConfig.model, channelId: effectiveVideoConfig.videoChannelId || effectiveVideoConfig.activeChannelId, size: effectiveVideoConfig.size, seconds: effectiveVideoConfig.videoSeconds, vquality: effectiveVideoConfig.vquality, mode: effectiveVideoConfig.videoMode, negativePrompt: effectiveVideoConfig.videoNegativePrompt, multiShot: effectiveVideoConfig.videoMultiShot, shotType: effectiveVideoConfig.videoShotType, generateAudio: effectiveVideoConfig.videoGenerateAudio, characterOrientation: effectiveVideoConfig.videoCharacterOrientation, watermark: effectiveVideoConfig.videoWatermark, references: generationReferenceUrls({ ...generationContext, referenceImages: videoReferenceImages, firstFrame, lastFrame }), firstFrameNodeId: sourceNode?.metadata?.firstFrameNodeId, lastFrameNodeId: sourceNode?.metadata?.lastFrameNodeId, klingImageNodeIds: sourceNode?.metadata?.klingImageNodeIds, klingMultiPrompt: sourceNode?.metadata?.klingMultiPrompt, klingElementList: sourceNode?.metadata?.klingElementList, startedAt: generationStartedAt, progress: 0, videoTaskId: clientTaskId },
                     };
                     pendingChildIds = [videoId];
                     setNodes((prev) => (isEmptyVideoNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode]));
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
-                    const created = await createVideoGenerationTask(videoGenerationConfig, requestPrompt, { references: videoReferenceImages, firstFrame, lastFrame, videoReferences: generationContext.referenceVideos, audioReferences: generationContext.referenceAudios }, undefined, { clientTaskId, source: "canvas", sourceId: videoId });
-                    setNodes((prev) => applyCanvasVideoTaskUpdate(prev, videoId, created.task, videoGenerationConfig, generationStartedAt, spec));
+                    const created = await createVideoGenerationTask(effectiveVideoConfig, requestPrompt, { references: videoReferenceImages, firstFrame, lastFrame, videoReferences: generationContext.referenceVideos, audioReferences: generationContext.referenceAudios }, undefined, { clientTaskId, source: "canvas", sourceId: videoId });
+                    setNodes((prev) => applyCanvasVideoTaskUpdate(prev, videoId, created.task, effectiveVideoConfig, generationStartedAt, spec));
                     void useWalletStore.getState().triggerWalletSync();
                     return;
                 }

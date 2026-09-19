@@ -35,6 +35,7 @@ export type CameraControlOptions = {
 export type CanvasNodeMetadata = {
     content?: string;
     aiccUri?: string;
+    aiccChannelId?: number;
     groupId?: string;
     composerContent?: string;
     prompt?: string;
@@ -159,9 +160,9 @@ export type CanvasAssistantReference = {
 
 export type InsertAssetPayload =
     | { kind: "text"; content: string; title: string; assetId?: string; source?: "asset" | "library" }
-    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; aiccUri?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
-    | { kind: "video"; url: string; title: string; storageKey?: string; aiccUri?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
-    | { kind: "audio"; url: string; title: string; storageKey?: string; aiccUri?: string; assetId?: string; bytes?: number; mimeType?: string; durationMs?: number; source?: "asset" | "library" };
+    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; aiccUri?: string; aiccChannelId?: number; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
+    | { kind: "video"; url: string; title: string; storageKey?: string; aiccUri?: string; aiccChannelId?: number; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
+    | { kind: "audio"; url: string; title: string; storageKey?: string; aiccUri?: string; aiccChannelId?: number; assetId?: string; bytes?: number; mimeType?: string; durationMs?: number; source?: "asset" | "library" };
 
 export type PendingAgentAsset = {
     nodeId: string;

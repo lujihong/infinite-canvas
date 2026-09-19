@@ -248,6 +248,7 @@ function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
         dataUrl: node.metadata?.content || "",
         storageKey: node.metadata.storageKey,
         aiccUri: node.metadata.aiccUri,
+        aiccChannelId: node.metadata.aiccChannelId,
     };
 }
 
@@ -268,6 +269,7 @@ function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
         url: node.metadata?.content || "",
         storageKey: node.metadata.storageKey,
         aiccUri: node.metadata.aiccUri,
+        aiccChannelId: node.metadata.aiccChannelId,
         bytes: node.metadata.bytes,
         width: node.metadata.naturalWidth,
         height: node.metadata.naturalHeight,
@@ -284,6 +286,7 @@ function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
         url: node.metadata?.content || "",
         storageKey: node.metadata.storageKey,
         aiccUri: node.metadata.aiccUri,
+        aiccChannelId: node.metadata.aiccChannelId,
         durationMs: node.metadata.durationMs,
     };
 }
