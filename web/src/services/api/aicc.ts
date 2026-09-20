@@ -46,20 +46,26 @@ export async function aiccChannels(signal?: AbortSignal): Promise<AiccChannel[]>
     return Array.isArray(value) ? value : [];
 }
 
-export async function aiccGroups(type: string, pageNo: number, channelId?: number, signal?: AbortSignal) {
+export async function aiccGroups(type: string, pageNo: number, channelIdOrSignal?: number | AbortSignal, maybeSignal?: AbortSignal) {
+    const channelId = typeof channelIdOrSignal === "number" ? channelIdOrSignal : undefined;
+    const signal = channelIdOrSignal instanceof AbortSignal ? channelIdOrSignal : maybeSignal;
     const params: Record<string, unknown> = { groupType: type, pageNo, pageSize: 12 };
     if (channelId && channelId > 0) params.channel_id = channelId;
     return page<AiccGroup>(await request("asset-groups", "GET", undefined, params, signal));
 }
 
-export async function aiccAssets(group: AiccGroup, pageNo: number, channelId?: number, signal?: AbortSignal) {
+export async function aiccAssets(group: AiccGroup, pageNo: number, channelIdOrSignal?: number | AbortSignal, maybeSignal?: AbortSignal) {
+    const channelId = typeof channelIdOrSignal === "number" ? channelIdOrSignal : undefined;
+    const signal = channelIdOrSignal instanceof AbortSignal ? channelIdOrSignal : maybeSignal;
     const params: Record<string, unknown> = { groupType: group.groupType, groupIds: group.groupId, pageNo, pageSize: 12 };
     const effectiveChannelId = channelId || group.channelId;
     if (effectiveChannelId && effectiveChannelId > 0) params.channel_id = effectiveChannelId;
     return page<AiccAsset>(await request("assets", "GET", undefined, params, signal));
 }
 
-export async function aiccSession(channelId?: number, signal?: AbortSignal): Promise<AiccSession> {
+export async function aiccSession(signalOrChannelId?: AbortSignal | number, maybeChannelId?: number, maybeSignal?: AbortSignal): Promise<AiccSession> {
+    const signal = signalOrChannelId instanceof AbortSignal ? signalOrChannelId : maybeSignal;
+    const channelId = typeof signalOrChannelId === "number" ? signalOrChannelId : maybeChannelId;
     const params = channelId && channelId > 0 ? { channel_id: channelId } : undefined;
     const value = await request("auth/session", "POST", {}, params, signal);
     if (!value?.bytedToken || !/^https:\/\//.test(value?.h5Link || "") || !Number.isFinite(value.expiresIn) || value.expiresIn <= 0) throw new Error("认证链接格式异常");

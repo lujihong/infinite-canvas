@@ -22,10 +22,10 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
     const { message } = App.useApp();
     const identity = useUserStore(state => state.user?.id);
     const channelsQuery = useQuery({ queryKey: ["aicc-channels"], queryFn: ({ signal }) => aiccChannels(signal), retry: false, enabled: !!identity });
-    const channels = channelsQuery.data || [];
+    const channels = Array.isArray(channelsQuery.data) ? channelsQuery.data : [];
     const [selectedChannelId, setSelectedChannelId] = useState<number | undefined>(undefined);
     const activeChannelId = selectedChannelId || channels[0]?.id;
-    const activeChannel = channels.find(c => c.id === activeChannelId);
+    const activeChannel = Array.isArray(channels) ? channels.find(c => c.id === activeChannelId) : undefined;
 
     const [type, setType] = useState<"LivenessFace" | "AIGC">("LivenessFace");
     const [groupPage, setGroupPage] = useState(1);
@@ -58,7 +58,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         controller.current?.abort(); controller.current = new AbortController();
         const version = ++lifecycle.current;
         setBusy(true); setFailure(""); setSession(null);
-        try { const value = await aiccSession(activeChannelId, controller.current.signal); if (version === lifecycle.current) {setSession(value); setNow(Date.now()); setExpiresAt(Date.now() + value.expiresIn * 1000);} }
+        try { const value = await aiccSession(controller.current.signal, activeChannelId); if (version === lifecycle.current) {setSession(value); setNow(Date.now()); setExpiresAt(Date.now() + value.expiresIn * 1000);} }
         catch (error) { if (version === lifecycle.current) setFailure(errorText(error)); }
         finally { if (version === lifecycle.current) setBusy(false); }
     };
@@ -123,7 +123,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
             </Button>
         </div>
         <p className="text-xs text-stone-500 dark:text-stone-400">素材来自移动云，仅展示当前账号有权访问的素材。选用后自动带入资产引用，不需要手动复制 ID。</p>
-        {!selectionEnabled && <Alert type="info" showIcon message="选用真人素材将自动为您切换至匹配的移动云 Seedance 2.0 合规模型。" />}
+        {!selectionEnabled && <Alert type="info" showIcon message="当前模型选用真人素材将自动为您切换至匹配的移动云 Seedance 2.0 合规模型（亦可手动切换 Seedance 后再选用）。" />}
         <p className="text-xs text-stone-500 dark:text-stone-400">真人认证成功后，可在同一人物组继续添加本人的素材；移动云会进行同人一致性与最终入库校验，认证或上传成功不保证素材入库成功。</p>
         {failure && <Alert type="error" showIcon message={failure} />}
         {session && <section className="flex flex-wrap items-center gap-4 rounded-lg border border-stone-200 p-4 dark:border-stone-700">
@@ -143,7 +143,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
             <AssetUploadForm key={`${type}:${group.groupId}`} group={group} onSubmitted={refreshAssets} />
             <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-stone-500">处理中每 10 秒检查，最多 12 次；页面不可见时暂停，可手动刷新。</span><Button onClick={refreshAssets}>刷新素材</Button></div>
             {assets.isError ? <Alert type="error" message={errorText(assets.error)} /> : assets.isLoading ? <Spin /> : !assets.data?.data.length ? <Empty description="本页暂无素材" /> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">{assets.data.data.map(asset=>{
-                const matchedChannel = channels.find(c => c.id === (asset.channelId || activeChannelId));
+                const matchedChannel = Array.isArray(channels) ? channels.find(c => c.id === (asset.channelId || activeChannelId)) : undefined;
                 const channelTag = matchedChannel ? matchedChannel.name : "移动云专线";
                 return (
                     <article key={asset.assetId} className="min-w-0 rounded-lg border border-stone-200 p-3 dark:border-stone-700">
@@ -157,7 +157,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
                                 <Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag>
                             </div>
                         </div>
-                        <Button className="mt-3 w-full" type="primary" disabled={asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button>
+                        <Button className="mt-3 w-full" type="primary" disabled={!selectionEnabled || asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button>
                     </article>
                 );
             })}</div>}
