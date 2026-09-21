@@ -21,11 +21,12 @@ export function AiccAssetPicker({ onInsert, selectionEnabled = true }: PickerPro
 function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
     const { message } = App.useApp();
     const identity = useUserStore(state => state.user?.id);
-    const channelsQuery = useQuery({ queryKey: ["aicc-channels"], queryFn: ({ signal }) => aiccChannels(signal), retry: false, enabled: !!identity });
+    const channelsQuery = useQuery({ queryKey: ["aicc-channels", identity], queryFn: ({ signal }) => aiccChannels(signal), retry: false, enabled: !!identity });
     const channels = Array.isArray(channelsQuery.data) ? channelsQuery.data : [];
     const [selectedChannelId, setSelectedChannelId] = useState<number | undefined>(undefined);
-    const activeChannelId = selectedChannelId || channels[0]?.id;
-    const activeChannel = Array.isArray(channels) ? channels.find(c => c.id === activeChannelId) : undefined;
+    const activeChannelId = selectedChannelId ?? (channels.length === 1 ? channels[0].id : undefined);
+    const activeChannel = channels.find(c => c.id === activeChannelId);
+    const channelReady = Boolean(identity && activeChannel && !channelsQuery.isError && !channelsQuery.isPending);
 
     const [type, setType] = useState<"LivenessFace" | "AIGC">("LivenessFace");
     const [groupPage, setGroupPage] = useState(1);
@@ -41,20 +42,21 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
     const lifecycle = useRef(0);
     const controller = useRef<AbortController | null>(null);
     useEffect(() => () => { lifecycle.current++; controller.current?.abort(); }, []);
-    const groups = useQuery({ queryKey: ["aicc", identity, "groups", type, groupPage, activeChannelId], queryFn: ({ signal }) => aiccGroups(type, groupPage, activeChannelId, signal), retry: false, enabled: !!identity });
+    const groups = useQuery({ queryKey: ["aicc", identity, "groups", type, groupPage, activeChannelId], queryFn: ({ signal }) => aiccGroups(type, groupPage, activeChannelId, signal), retry: false, enabled: channelReady });
     const group = groups.data?.data.find(item => item.groupId === selected?.groupId) || groups.data?.data[0];
-    const assets = useQuery({ queryKey: ["aicc", identity, "assets", group?.groupId, type, assetPage, activeChannelId], queryFn: ({ signal }) => aiccAssets(group!, assetPage, activeChannelId, signal), enabled: !!identity && !!group, retry: false, refetchOnWindowFocus: false,
+    const assets = useQuery({ queryKey: ["aicc", identity, "assets", group?.groupId, type, assetPage, activeChannelId], queryFn: ({ signal }) => aiccAssets(group!, assetPage, activeChannelId, signal), enabled: channelReady && !!group, retry: false, refetchOnWindowFocus: false,
         refetchIntervalInBackground: false,
         refetchInterval: query => pollCount.current < 12 && !query.state.error && query.state.data?.data.some(item => item.status.toUpperCase() === "PROCESSING") ? 10_000 : false,
     });
     useEffect(() => { pollCount.current = 0; }, [group?.groupId, type, assetPage]);
     useEffect(() => { if (assets.dataUpdatedAt) pollCount.current++; }, [assets.dataUpdatedAt]);
     const refreshAssets = () => { pollCount.current = 0; void assets.refetch(); };
-    useEffect(() => { setSelected(null); setGroupPage(1); setAssetPage(1); setSession(null); controller.current?.abort(); lifecycle.current++; }, [identity, activeChannelId]);
+    useEffect(() => { setSelected(null); setGroupPage(1); setAssetPage(1); setSession(null); setBusy(false); setFailure(""); setExpiresAt(0); controller.current?.abort(); lifecycle.current++; }, [identity, activeChannelId]);
     useEffect(() => { setAssetPage(1); }, [group?.groupId]);
     useEffect(() => { if (!session) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [session]);
     const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
     const begin = async () => {
+        if (!channelReady || busy) return;
         controller.current?.abort(); controller.current = new AbortController();
         const version = ++lifecycle.current;
         setBusy(true); setFailure(""); setSession(null);
@@ -75,6 +77,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         finally { if (version === lifecycle.current) setBusy(false); }
     };
     const mutate = async (operation: () => Promise<unknown>, success: string) => {
+        if (!channelReady || busy) return;
         const version = lifecycle.current;
         setBusy(true); setFailure("");
         try { await operation(); if (version === lifecycle.current) {message.success(success); void groups.refetch(); void assets.refetch();} }
@@ -82,7 +85,8 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         finally { if (version === lifecycle.current) setBusy(false); }
     };
     const insert = (asset: AiccAsset) => {
-        if (asset.status.toUpperCase() !== "ACTIVE") return;
+        if (!channelReady || !selectionEnabled || asset.status.toUpperCase() !== "ACTIVE") return;
+        if (asset.channelId !== activeChannelId) { message.error("素材来源与当前渠道不一致，请刷新后重新选择"); return; }
         const aiccUri = `asset://${asset.assetId}`;
         if (!/^asset:\/\/asset-[A-Za-z0-9_-]+$/.test(aiccUri)) {message.error("素材标识异常，请刷新");return;}
         const preview = /^https?:\/\//.test(asset.assetUrl || "") ? asset.assetUrl! : "";
@@ -92,6 +96,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         else if (asset.assetType === "Audio") onInsert({...base, kind:"audio", url:preview, mimeType:"audio/mpeg"});
     };
     return <div className="space-y-4 text-sm">
+        {channelsQuery.isPending ? <Spin /> : channelsQuery.isError ? <Alert type="error" message={errorText(channelsQuery.error)} action={<Button onClick={() => void channelsQuery.refetch()}>重试渠道加载</Button>} /> : !channels.length ? <Empty description="暂无可用的移动云素材渠道" /> : !channelReady ? <Alert type="info" message="请选择素材所属的移动云渠道" /> : null}
         <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
                 {(["LivenessFace","AIGC"] as const).map(value => <Button key={value} type={type === value ? "primary" : "default"} onClick={() => {setType(value);setSelected(null);setGroupPage(1);setAssetPage(1);}}>{value === "LivenessFace" ? "真人肖像" : "虚拟人物"}</Button>)}
@@ -118,19 +123,19 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
                     </span>
                 ) : null}
             </div>
-            <Button loading={busy} onClick={() => void begin()}>
+            <Button disabled={!channelReady} loading={busy} onClick={() => void begin()}>
                 {channels.length > 1 && activeChannel ? `在「${activeChannel.name}」发起认证` : "发起真人认证"}
             </Button>
         </div>
         <p className="text-xs text-stone-500 dark:text-stone-400">素材来自移动云，仅展示当前账号有权访问的素材。选用后自动带入资产引用，不需要手动复制 ID。</p>
-        {!selectionEnabled && <Alert type="info" showIcon message="当前模型选用真人素材将自动为您切换至匹配的移动云 Seedance 2.0 合规模型（亦可手动切换 Seedance 后再选用）。" />}
+        {!selectionEnabled && <Alert type="info" showIcon message="当前模型不支持移动云素材。请先选择支持的 Seedance 模型，再选用素材。" />}
         <p className="text-xs text-stone-500 dark:text-stone-400">真人认证成功后，可在同一人物组继续添加本人的素材；移动云会进行同人一致性与最终入库校验，认证或上传成功不保证素材入库成功。</p>
         {failure && <Alert type="error" showIcon message={failure} />}
         {session && <section className="flex flex-wrap items-center gap-4 rounded-lg border border-stone-200 p-4 dark:border-stone-700">
             <QRCode value={session.h5Link} size={144} status={seconds ? "active" : "expired"} onRefresh={() => void begin()} />
             <div className="min-w-0 flex-1 space-y-2"><p className="font-medium">用手机完成活体核验与肖像授权</p><p className="text-xs">{seconds ? `链接剩余 ${Math.floor(seconds/60)}分${seconds%60}秒` : "链接已过期，请重新发起"}</p><div className="flex flex-wrap gap-2"><Button disabled={!seconds} href={session.h5Link} target="_blank" rel="noopener noreferrer">手机端打开链接</Button><Button disabled={!seconds} onClick={() => {void navigator.clipboard.writeText(session.h5Link).then(() => message.success("已复制"), () => message.error("复制失败"));}}>复制链接</Button><Button loading={busy} disabled={!seconds} onClick={() => void check()}>查询认证结果</Button></div></div>
         </section>}
-        {type === "AIGC" && <div className="flex gap-2"><Input aria-label="新素材组名称" placeholder="虚拟人物组名称" maxLength={64} value={groupName} onChange={e=>setGroupName(e.target.value)} /><Button disabled={!groupName.trim() || busy} onClick={() => void mutate(()=>aiccCreateGroup(groupName.trim(), activeChannelId),"素材组已创建")}>新建组</Button></div>}
+        {channelReady && type === "AIGC" && <div className="flex gap-2"><Input aria-label="新素材组名称" placeholder="虚拟人物组名称" maxLength={64} value={groupName} onChange={e=>setGroupName(e.target.value)} /><Button disabled={!groupName.trim() || busy} onClick={() => void mutate(()=>aiccCreateGroup(groupName.trim(), activeChannelId),"素材组已创建")}>新建组</Button></div>}
         {groups.isError ? <Alert type="error" message={errorText(groups.error)} action={<Button onClick={()=>void groups.refetch()}>重试</Button>} /> : groups.isLoading ? <Spin /> : <>
             <Select className="w-full" aria-label="选择人物素材组" placeholder="选择素材组" value={group?.groupId} options={groups.data?.data.map(item=>({value:item.groupId,label:item.groupName || item.groupId}))} onChange={id=>{setSelected(groups.data?.data.find(item=>item.groupId===id)||null);setAssetPage(1);}} />
             <nav aria-label="人物素材组分页" className="flex flex-wrap items-center justify-end" style={{ marginTop: 12, gap: 12, paddingBottom: 4 }}>
@@ -139,8 +144,8 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
                 <Button size="small" aria-label="素材组下一页" disabled={groups.isFetching || (groups.data?.total!==undefined ? groupPage*12>=groups.data.total : (groups.data?.data.length||0)<12)} onClick={()=>setGroupPage(p=>p+1)}>下一页</Button>
             </nav>
         </>}
-        {group && <>
-            <AssetUploadForm key={`${type}:${group.groupId}`} group={group} onSubmitted={refreshAssets} />
+        {channelReady && group && <>
+            <AssetUploadForm key={`${activeChannelId}:${type}:${group.groupId}`} group={{...group, channelId: activeChannelId}} onSubmitted={refreshAssets} />
             <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-stone-500">处理中每 10 秒检查，最多 12 次；页面不可见时暂停，可手动刷新。</span><Button onClick={refreshAssets}>刷新素材</Button></div>
             {assets.isError ? <Alert type="error" message={errorText(assets.error)} /> : assets.isLoading ? <Spin /> : !assets.data?.data.length ? <Empty description="本页暂无素材" /> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">{assets.data.data.map(asset=>{
                 const matchedChannel = Array.isArray(channels) ? channels.find(c => c.id === (asset.channelId || activeChannelId)) : undefined;
@@ -238,7 +243,7 @@ function AssetUploadForm({ group, onSubmitted }: { group: AiccGroup; onSubmitted
                     validateAiccFile(file, assetType);
                     await validateDuration(file, assetType, controller.signal);
                     if (!valid()) return;
-                    const result = await aiccUpload(file, group.groupId, assetType, controller.signal);
+                    const result = await aiccUpload(file, group.groupId, assetType, controller.signal, group.channelId);
                     if (!valid()) return;
                     uploaded.current = result;
                 }
@@ -246,7 +251,7 @@ function AssetUploadForm({ group, onSubmitted }: { group: AiccGroup; onSubmitted
             }
             if (!valid()) return;
             setPhase("creating");
-            await aiccCreateAsset(group.groupId, name.trim(), assetUrl, assetType, controller.signal);
+            await aiccCreateAsset(group.groupId, name.trim(), assetUrl, assetType, controller.signal, group.channelId);
             if (!valid()) return;
             uploaded.current = null;
             setFile(null);

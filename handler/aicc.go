@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,6 +110,11 @@ var aiccUploadSlots = make(chan struct{}, 4)
 // Stage the bounded body on disk, not in memory. A truncated upload must never
 // be forwarded as a successful request; the relay performs full media validation.
 func aiccUploadProxy(w http.ResponseWriter, r *http.Request, userID string) {
+	query, err := parseAICCChannelQuery(r.URL.Query())
+	if err != nil {
+		FailWithStatus(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	contentType := r.Header.Get("Content-Type")
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil || mediaType != "multipart/form-data" || params["boundary"] == "" || len(params["boundary"]) > 70 {
@@ -145,7 +152,7 @@ func aiccUploadProxy(w http.ResponseWriter, r *http.Request, userID string) {
 		FailWithStatus(w, http.StatusInternalServerError, "无法读取上传文件")
 		return
 	}
-	payload, status, err := service.AICCUploadRequest(r.Context(), userID, contentType, file)
+	payload, status, err := service.AICCUploadRequest(r.Context(), userID, contentType, query, file)
 	if err != nil {
 		FailWithStatus(w, status, err.Error())
 		return
@@ -154,6 +161,43 @@ func aiccUploadProxy(w http.ResponseWriter, r *http.Request, userID string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(payload)
+}
+
+func parseAICCChannelQuery(values url.Values) (url.Values, error) {
+	result := url.Values{}
+	for _, key := range []string{"pageNo", "pageSize", "groupType", "groupName", "groupIds", "groupIds[]", "assetName", "statuses", "statuses[]"} {
+		for _, value := range values[key] {
+			result.Add(key, value)
+		}
+	}
+	channelIDs := values["channel_id"]
+	if len(channelIDs) == 0 {
+		return result, nil
+	}
+	first := strings.TrimSpace(channelIDs[0])
+	if !isPositiveDecimal(first) {
+		return nil, errors.New("channel_id 必须为正整数")
+	}
+	for _, value := range channelIDs[1:] {
+		if strings.TrimSpace(value) != first {
+			return nil, errors.New("channel_id 重复值冲突")
+		}
+	}
+	result.Set("channel_id", first)
+	return result, nil
+}
+
+func isPositiveDecimal(value string) bool {
+	if value == "" || value == "0" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	id, err := strconv.ParseInt(value, 10, 32)
+	return err == nil && id > 0
 }
 
 // AICCProxy exposes only the asset API, never arbitrary relay paths or caller-supplied credentials.
@@ -172,11 +216,10 @@ func AICCProxy(w http.ResponseWriter, r *http.Request) {
 		aiccUploadProxy(w, r, user.ID)
 		return
 	}
-	query := url.Values{}
-	for _, key := range []string{"pageNo", "pageSize", "groupType", "groupName", "groupIds", "groupIds[]", "assetName", "statuses", "statuses[]"} {
-		for _, v := range r.URL.Query()[key] {
-			query.Add(key, v)
-		}
+	query, err := parseAICCChannelQuery(r.URL.Query())
+	if err != nil {
+		FailWithStatus(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	const maxBody = 1 << 20
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))

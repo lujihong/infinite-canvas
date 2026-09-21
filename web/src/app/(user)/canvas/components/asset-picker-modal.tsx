@@ -220,10 +220,10 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
         } else {
             onInsert(
                 asset.kind === "video"
-                    ? { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, assetId: asset.id, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType, source: "asset" }
+                    ? { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, aiccUri: asset.data.aiccUri, aiccChannelId: asset.data.aiccChannelId, title: asset.title, assetId: asset.id, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType, source: "asset" }
                     : asset.kind === "audio"
-                      ? { kind: "audio", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, assetId: asset.id, bytes: asset.data.bytes, mimeType: asset.data.mimeType, durationMs: asset.data.durationMs, source: "asset" }
-                      : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title, assetId: asset.id, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType, source: "asset" },
+                      ? { kind: "audio", url: asset.data.url, storageKey: asset.data.storageKey, aiccUri: asset.data.aiccUri, aiccChannelId: asset.data.aiccChannelId, title: asset.title, assetId: asset.id, bytes: asset.data.bytes, mimeType: asset.data.mimeType, durationMs: asset.data.durationMs, source: "asset" }
+                      : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, aiccUri: asset.data.aiccUri, aiccChannelId: asset.data.aiccChannelId, title: asset.title, assetId: asset.id, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType, source: "asset" },
             );
         }
     };

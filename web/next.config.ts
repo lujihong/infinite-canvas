@@ -15,6 +15,7 @@ export default function nextConfig(phase: string): NextConfig {
 
     return {
         output: "standalone",
+        experimental: { cpus: 1, webpackBuildWorker: false, webpackMemoryOptimizations: true, parallelServerCompiles: false, parallelServerBuildTraces: false },
         allowedDevOrigins: isDev ? ["*.*.*.*"] : [],
         typescript: {
             ignoreBuildErrors: true,

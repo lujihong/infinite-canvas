@@ -51,12 +51,12 @@ func AICCRequest(ctx context.Context, userID, method, path string, query url.Val
 }
 
 // AICCUploadRequest keeps uploads on the same dedicated identity as the asset API.
-func AICCUploadRequest(ctx context.Context, userID, contentType string, body io.Reader) ([]byte, int, error) {
+func AICCUploadRequest(ctx context.Context, userID, contentType string, query url.Values, body io.Reader) ([]byte, int, error) {
 	token, err := AICCUserToken(userID)
 	if err != nil {
 		return nil, http.StatusForbidden, err
 	}
-	return aiccRelayRequestContent(ctx, getNewAPIBaseURL(), token, http.MethodPost, "uploads", nil, body, contentType)
+	return aiccRelayRequestContent(ctx, getNewAPIBaseURL(), token, http.MethodPost, "uploads", query, body, contentType)
 }
 
 func aiccRelayRequest(ctx context.Context, base, token, method, path string, query url.Values, body io.Reader) ([]byte, int, error) {

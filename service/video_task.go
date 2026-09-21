@@ -2,7 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,27 +32,32 @@ var (
 )
 
 type VideoTaskCreateInput struct {
-	UserID          string
-	UserDisplayName string
-	Model           string
-	ChannelID       string
-	UserChannelID   string
-	ChannelName     string
-	Source          string
-	SourceID        string
-	ClientTaskID    string
-	UpstreamTaskID  string
-	UpstreamVideoID string
-	Status          string
-	Progress        int
-	Seconds         string
-	Size            string
-	VideoURL        string
-	Error           string
-	ErrorDetail     string
-	RequestBody     string
-	ResponseBody    string
-	Credits         int
+	UserID             string
+	UserDisplayName    string
+	Model              string
+	ChannelID          string
+	UserChannelID      string
+	ChannelName        string
+	SourceKind         string
+	GatewayBaseURL     string
+	GatewayUserID      string
+	ChannelIdentity    string
+	ChannelFingerprint string
+	Source             string
+	SourceID           string
+	ClientTaskID       string
+	UpstreamTaskID     string
+	UpstreamVideoID    string
+	Status             string
+	Progress           int
+	Seconds            string
+	Size               string
+	VideoURL           string
+	Error              string
+	ErrorDetail        string
+	RequestBody        string
+	ResponseBody       string
+	Credits            int
 }
 
 type VideoTaskPollUpdate struct {
@@ -70,30 +80,38 @@ func CreateVideoTask(input VideoTaskCreateInput) (model.VideoTask, error) {
 		status = "queued"
 	}
 	task := model.VideoTask{
-		ID:              firstVideoTaskValue(input.ClientTaskID, input.UpstreamTaskID, input.UpstreamVideoID, "video-task-"+uuid.NewString()),
-		UserID:          strings.TrimSpace(input.UserID),
-		UserDisplayName: strings.TrimSpace(input.UserDisplayName),
-		Model:           strings.TrimSpace(input.Model),
-		ChannelID:       strings.TrimSpace(input.ChannelID),
-		UserChannelID:   strings.TrimSpace(input.UserChannelID),
-		ChannelName:     strings.TrimSpace(input.ChannelName),
-		Source:          normalizeVideoTaskSource(input.Source),
-		SourceID:        strings.TrimSpace(input.SourceID),
-		UpstreamTaskID:  strings.TrimSpace(input.UpstreamTaskID),
-		UpstreamVideoID: strings.TrimSpace(input.UpstreamVideoID),
-		Status:          status,
-		Progress:        clampProgress(input.Progress),
-		Seconds:         strings.TrimSpace(input.Seconds),
-		Size:            strings.TrimSpace(input.Size),
-		VideoURL:        strings.TrimSpace(input.VideoURL),
-		Error:           strings.TrimSpace(input.Error),
-		ErrorDetail:     strings.TrimSpace(input.ErrorDetail),
-		RequestBody:     input.RequestBody,
-		ResponseBody:    input.ResponseBody,
-		LastResponse:    input.ResponseBody,
-		Credits:         input.Credits,
-		CreatedAt:       current,
-		UpdatedAt:       current,
+		ID:                 firstVideoTaskValue(input.ClientTaskID, input.UpstreamTaskID, input.UpstreamVideoID, "video-task-"+uuid.NewString()),
+		UserID:             strings.TrimSpace(input.UserID),
+		UserDisplayName:    strings.TrimSpace(input.UserDisplayName),
+		Model:              strings.TrimSpace(input.Model),
+		ChannelID:          strings.TrimSpace(input.ChannelID),
+		UserChannelID:      strings.TrimSpace(input.UserChannelID),
+		ChannelName:        strings.TrimSpace(input.ChannelName),
+		SourceKind:         normalizeVideoTaskSourceKind(input.SourceKind),
+		GatewayBaseURL:     strings.TrimRight(strings.TrimSpace(input.GatewayBaseURL), "/"),
+		GatewayUserID:      strings.TrimSpace(input.GatewayUserID),
+		ChannelIdentity:    strings.TrimSpace(input.ChannelIdentity),
+		ChannelFingerprint: input.ChannelFingerprint,
+		Source:             normalizeVideoTaskSource(input.Source),
+		SourceID:           strings.TrimSpace(input.SourceID),
+		UpstreamTaskID:     strings.TrimSpace(input.UpstreamTaskID),
+		UpstreamVideoID:    strings.TrimSpace(input.UpstreamVideoID),
+		Status:             status,
+		Progress:           clampProgress(input.Progress),
+		Seconds:            strings.TrimSpace(input.Seconds),
+		Size:               strings.TrimSpace(input.Size),
+		VideoURL:           strings.TrimSpace(input.VideoURL),
+		Error:              strings.TrimSpace(input.Error),
+		ErrorDetail:        strings.TrimSpace(input.ErrorDetail),
+		RequestBody:        input.RequestBody,
+		ResponseBody:       input.ResponseBody,
+		LastResponse:       input.ResponseBody,
+		Credits:            input.Credits,
+		CreatedAt:          current,
+		UpdatedAt:          current,
+	}
+	if task.SourceKind == "" || task.ChannelIdentity == "" || task.GatewayBaseURL == "" || (task.SourceKind == VideoTaskSourceOfficial && task.GatewayUserID == "") {
+		return model.VideoTask{}, ErrVideoTaskChannelSnapshotUnavailable
 	}
 	if IsCompletedVideoTaskStatus(task.Status) || task.VideoURL != "" {
 		task.Status = "completed"
@@ -162,6 +180,10 @@ func VideoTaskResponse(task model.VideoTask) map[string]any {
 	if IsFailedVideoTaskStatus(task.Status) && (task.Error != "" || task.ErrorDetail != "") {
 		result["error"] = map[string]any{"message": firstVideoTaskValue(task.Error, task.ErrorDetail)}
 		result["error_detail"] = task.ErrorDetail
+	}
+	if _, err := ResolveVideoTaskChannel(task); err != nil {
+		result["error"] = map[string]any{"code": "video_task_channel_configuration", "message": err.Error(), "recoverable": true}
+		result["error_detail"] = err.Error()
 	}
 	return result
 }
@@ -360,6 +382,119 @@ func firstVideoTaskValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+const (
+	VideoTaskSourceOfficial  = "official"
+	VideoTaskSourceUserLocal = "user-local"
+	VideoTaskSourcePublic    = "public"
+)
+
+var ErrVideoTaskChannelSnapshotUnavailable = errors.New("视频任务缺少渠道来源快照，请恢复原始任务快照后重试")
+var ErrVideoTaskChannelConfiguration = errors.New("视频任务渠道配置已变化，请恢复原绑定与配置后重试")
+
+const officialVideoChannelID = "xyb-official-exclusive"
+
+// CaptureVideoTaskChannel freezes the actual request identity before submission.
+// Credentials only live in the returned channel, never in the persisted snapshot.
+func CaptureVideoTaskChannel(userID string, channel model.ModelChannel, userChannelID string) (model.ModelChannel, VideoTaskCreateInput, error) {
+	snapshot := VideoTaskCreateInput{SourceKind: VideoTaskSourcePublic, ChannelIdentity: strings.TrimSpace(channel.ID)}
+	if userChannelID == officialVideoChannelID || channel.ID == officialVideoChannelID {
+		current, gatewayUserID, err := officialVideoTaskChannel(userID)
+		if err != nil {
+			return model.ModelChannel{}, VideoTaskCreateInput{}, err
+		}
+		channel = current
+		snapshot.SourceKind = VideoTaskSourceOfficial
+		snapshot.ChannelIdentity = officialVideoChannelID
+		snapshot.GatewayUserID = gatewayUserID
+	} else if strings.TrimSpace(userChannelID) != "" {
+		snapshot.SourceKind = VideoTaskSourceUserLocal
+	}
+	snapshot.GatewayBaseURL = strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/")
+	snapshot.ChannelFingerprint = videoTaskChannelFingerprint(channel, snapshot.SourceKind)
+	if snapshot.ChannelIdentity == "" || snapshot.GatewayBaseURL == "" {
+		return model.ModelChannel{}, VideoTaskCreateInput{}, ErrVideoTaskChannelSnapshotUnavailable
+	}
+	return channel, snapshot, nil
+}
+
+func officialVideoTaskChannel(userID string) (model.ModelChannel, string, error) {
+	user, found, err := repository.GetUserByID(strings.TrimSpace(userID))
+	if err != nil || !found {
+		return model.ModelChannel{}, "", ErrVideoTaskChannelConfiguration
+	}
+	token, err := aiccUserToken(user)
+	if err != nil {
+		return model.ModelChannel{}, "", ErrVideoTaskChannelConfiguration
+	}
+	var extra UserExtraInfo
+	if json.Unmarshal([]byte(user.Extra), &extra) != nil {
+		return model.ModelChannel{}, "", ErrVideoTaskChannelConfiguration
+	}
+	return model.ModelChannel{ID: officialVideoChannelID, Name: "鑫元宝官方模型服务", Protocol: "openai", BaseURL: getNewAPIBaseURL(), APIKey: token, Models: []string{"*"}, Timeout: 600, Enabled: true}, strconv.Itoa(extra.NewAPIUserID), nil
+}
+
+// ResolveVideoTaskChannel never chooses another channel when a saved identity is missing.
+func ResolveVideoTaskChannel(task model.VideoTask) (model.ModelChannel, error) {
+	if normalizeVideoTaskSourceKind(task.SourceKind) == "" || task.ChannelIdentity == "" || task.GatewayBaseURL == "" {
+		return model.ModelChannel{}, ErrVideoTaskChannelSnapshotUnavailable
+	}
+	var channel model.ModelChannel
+	var err error
+	switch task.SourceKind {
+	case VideoTaskSourceOfficial:
+		if task.GatewayUserID == "" {
+			return model.ModelChannel{}, ErrVideoTaskChannelSnapshotUnavailable
+		}
+		if task.ChannelIdentity != officialVideoChannelID || task.ChannelID != officialVideoChannelID || task.UserChannelID != officialVideoChannelID {
+			return model.ModelChannel{}, ErrVideoTaskChannelConfiguration
+		}
+		var gatewayUserID string
+		channel, gatewayUserID, err = officialVideoTaskChannel(task.UserID)
+		if err == nil && gatewayUserID != task.GatewayUserID {
+			err = ErrVideoTaskChannelConfiguration
+		}
+	case VideoTaskSourceUserLocal:
+		if task.UserChannelID == "" || task.UserChannelID == officialVideoChannelID || task.UserChannelID != task.ChannelIdentity || task.ChannelID != task.ChannelIdentity {
+			return model.ModelChannel{}, ErrVideoTaskChannelConfiguration
+		}
+		channel, err = SelectUserLocalModelChannelForModel(task.UserID, task.Model, task.UserChannelID)
+	case VideoTaskSourcePublic:
+		if task.UserChannelID != "" || task.ChannelID == "" || task.ChannelID == officialVideoChannelID || task.ChannelID != task.ChannelIdentity {
+			return model.ModelChannel{}, ErrVideoTaskChannelConfiguration
+		}
+		channel, err = SelectModelChannelForModel(task.Model, task.ChannelID)
+	default:
+		return model.ModelChannel{}, ErrVideoTaskChannelSnapshotUnavailable
+	}
+	if err != nil || channel.ID != task.ChannelIdentity || strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/") != task.GatewayBaseURL || task.ChannelFingerprint == "" || task.ChannelFingerprint != videoTaskChannelFingerprint(channel, task.SourceKind) {
+		return model.ModelChannel{}, ErrVideoTaskChannelConfiguration
+	}
+	return channel, nil
+}
+
+func videoTaskChannelFingerprint(channel model.ModelChannel, sourceKind string) string {
+	key := channel.APIKey
+	if sourceKind == VideoTaskSourceOfficial {
+		key = ""
+	} // Dedicated gateway identity is checked separately; its token may rotate.
+	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
+	if protocol == "" {
+		protocol = "openai"
+	}
+	wire, _ := json.Marshal([]string{channel.ID, strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/"), protocol, key})
+	digest := sha256.Sum256(wire)
+	return hex.EncodeToString(digest[:])
+}
+
+func normalizeVideoTaskSourceKind(sourceKind string) string {
+	switch strings.ToLower(strings.TrimSpace(sourceKind)) {
+	case VideoTaskSourceOfficial, VideoTaskSourceUserLocal, VideoTaskSourcePublic:
+		return strings.ToLower(strings.TrimSpace(sourceKind))
+	default:
+		return ""
+	}
 }
 
 func normalizeVideoTaskSource(source string) string {

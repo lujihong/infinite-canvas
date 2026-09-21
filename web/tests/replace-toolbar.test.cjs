@@ -2,38 +2,53 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
+const ts = require('typescript');
+const React = require('react');
+const {createRoot} = require('react-dom/client');
+const {createRequire} = require('node:module');
+const relayRequire = createRequire(process.env.XYB_RELAY_PACKAGE || path.resolve(__dirname,'../package.json'));
+const {JSDOM} = relayRequire('jsdom');
 
-test('canvas-node-hover-toolbar action button does not trigger onClick when menuContent is present', () => {
-    const toolbarSource = fs.readFileSync(path.resolve(__dirname, '../src/app/(user)/canvas/components/canvas-node-hover-toolbar.tsx'), 'utf8');
-    
-    // 验证核心防线：当有 menuContent 时，button 的 onClick 必须为 undefined，严禁调用外部上传回调
-    assert.ok(
-        toolbarSource.includes('onClick={menuContent ? undefined : onClick}'),
-        'button onClick must be undefined when menuContent is provided to prevent firing upload file input dialog'
-    );
-    
-    // 验证包含 Popover 受控与自关闭容器
-    assert.ok(
-        toolbarSource.includes('open={popoverOpen}'),
-        'Popover must be state controlled'
-    );
-    assert.ok(
-        toolbarSource.includes('setPopoverOpen(false)'),
-        'menu click must auto-dismiss the Popover'
-    );
-    
-    // 验证三路来源完整性：AICC 真人素材库、我的素材库、本地上传
-    assert.ok(toolbarSource.includes('从真人素材库选择 (AICC)'), 'Must offer AICC image selection');
-    assert.ok(toolbarSource.includes('从真人视频库选择 (AICC)'), 'Must offer AICC video selection');
-    assert.ok(toolbarSource.includes('从我的素材库选择'), 'Must offer My Assets selection');
-    assert.ok(toolbarSource.includes('从本地文件上传'), 'Must offer Local File upload option');
-});
-
-test('canvas-node-reference-bar plus button provides AICC and My Assets options without auto-connecting', () => {
-    const refBarSource = fs.readFileSync(path.resolve(__dirname, '../src/app/(user)/canvas/components/canvas-node-reference-bar.tsx'), 'utf8');
-    
-    // 验证参考内容加号提供了 Popover 菜单
-    assert.ok(refBarSource.includes('从真人素材库选用 (AICC)'), 'Reference bar must offer AICC option');
-    assert.ok(refBarSource.includes('从我的素材库选用'), 'Reference bar must offer My Assets option');
-    assert.ok(refBarSource.includes('从画布节点选择连线'), 'Reference bar must offer canvas node connection option');
+test('real Popover trigger opens sources without file click; only local choice opens file input',async()=>{
+ const dom = new JSDOM('<div id="root"></div><input id="file" type="file">',{url:'https://workbench.example',pretendToBeVisual:true});
+ const saved=new Map();
+ saved.set('ResizeObserver',Object.getOwnPropertyDescriptor(global,'ResizeObserver'));
+ global.ResizeObserver=class {observe(){} unobserve(){} disconnect(){}};
+ for(const key of ['window','document','navigator','HTMLElement','HTMLInputElement','SVGElement','Element','Node','ShadowRoot','getComputedStyle','MutationObserver','IS_REACT_ACT_ENVIRONMENT']){
+  saved.set(key,Object.getOwnPropertyDescriptor(global,key));
+  Object.defineProperty(global,key,{configurable:true,writable:true,value:key==='IS_REACT_ACT_ENVIRONMENT'?true:dom.window[key]});
+ }
+ dom.window.matchMedia=()=>({matches:false,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){}});
+ const source=fs.readFileSync(path.join(__dirname,'../src/app/(user)/canvas/components/canvas-node-hover-toolbar.tsx'),'utf8');
+ const ast=ts.createSourceFile('toolbar.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const fn=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='ToolbarAction');
+ assert.ok(fn);
+ const compiled=ts.transpileModule('import {useState} from "react";import {Popover,Tooltip} from "antd";'+fn.getText(ast)+'\nexport {ToolbarAction};',{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+ const scope={exports:{},require:id=>id==='react'?React:id==='antd'?require('antd'):require(id)};
+ vm.runInNewContext(compiled,scope);
+ const Action=scope.exports.ToolbarAction;
+ let files=0, aicc=0, mine=0;
+ const input=document.getElementById('file');
+ input.addEventListener('click',()=>files++);
+ const upload=()=>input.click();
+ const menu=React.createElement('div',null,
+  React.createElement('button',{onClick:()=>aicc++},'移动云素材'),
+  React.createElement('button',{onClick:()=>mine++},'我的素材'),
+  React.createElement('button',{onClick:upload},'本地文件'));
+ const root=createRoot(document.getElementById('root'));
+ const click=async text=>{const button=[...document.querySelectorAll('button')].find(n=>n.textContent===text);assert.ok(button,text);await React.act(async()=>{button.click();await new Promise(r=>setTimeout(r,40));});};
+ try{
+  await React.act(async()=>root.render(React.createElement(Action,{title:'替换图片',label:'替换图片',showLabel:true,onClick:upload,menuContent:menu})));
+  await click('替换图片'); assert.equal(files,0);
+  await click('移动云素材');assert.equal(aicc,1);assert.equal(files,0);
+  await click('替换图片');await click('我的素材');assert.equal(mine,1);assert.equal(files,0);
+  await click('替换图片');await click('本地文件');assert.equal(files,1);
+  await React.act(async()=>root.render(React.createElement(Action,{key:'new-video-node',title:'替换视频',label:'替换视频',showLabel:true,onClick:upload,menuContent:menu})));
+  assert.equal(document.querySelectorAll('.ant-popover:not(.ant-popover-hidden)').length,0);
+  await click('替换视频');assert.equal(files,1);await click('本地文件');assert.equal(files,2);
+ }finally{
+  await React.act(async()=>root.unmount());dom.window.close();
+  for(const [key,descriptor] of saved){if(descriptor)Object.defineProperty(global,key,descriptor);else delete global[key];}
+ }
 });

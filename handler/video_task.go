@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -88,6 +89,14 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		userChannelID = "xyb-official-exclusive"
+	}
+	channel, snapshot, err := service.CaptureVideoTaskChannel(user.ID, channel, userChannelID)
+	if err != nil {
+		FailWithStatus(w, http.StatusConflict, err.Error())
+		return
+	}
+	if userChannelID != "" {
+		userChannelID = channel.ID
 	}
 	credits := 0
 	if userChannelID == "" {
@@ -170,27 +179,32 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task, err := service.CreateVideoTask(service.VideoTaskCreateInput{
-		UserID:          user.ID,
-		UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
-		Model:           modelName,
-		ChannelID:       channel.ID,
-		UserChannelID:   userChannelID,
-		ChannelName:     channel.Name,
-		Source:          readVideoTaskSource(r),
-		SourceID:        readVideoTaskSourceID(r),
-		ClientTaskID:    readClientVideoTaskID(r),
-		UpstreamTaskID:  parsed.UpstreamTaskID,
-		UpstreamVideoID: parsed.UpstreamVideoID,
-		Status:          parsed.Status,
-		Progress:        parsed.Progress,
-		Seconds:         parsed.Seconds,
-		Size:            parsed.Size,
-		VideoURL:        parsed.VideoURL,
-		Error:           parsed.Error,
-		ErrorDetail:     parsed.ErrorDetail,
-		RequestBody:     logContext.RequestBody,
-		ResponseBody:    string(transformed),
-		Credits:         credits,
+		UserID:             user.ID,
+		UserDisplayName:    firstNonEmpty(user.DisplayName, user.Username),
+		Model:              modelName,
+		ChannelID:          channel.ID,
+		UserChannelID:      userChannelID,
+		ChannelName:        channel.Name,
+		SourceKind:         snapshot.SourceKind,
+		GatewayBaseURL:     snapshot.GatewayBaseURL,
+		GatewayUserID:      snapshot.GatewayUserID,
+		ChannelIdentity:    snapshot.ChannelIdentity,
+		ChannelFingerprint: snapshot.ChannelFingerprint,
+		Source:             readVideoTaskSource(r),
+		SourceID:           readVideoTaskSourceID(r),
+		ClientTaskID:       readClientVideoTaskID(r),
+		UpstreamTaskID:     parsed.UpstreamTaskID,
+		UpstreamVideoID:    parsed.UpstreamVideoID,
+		Status:             parsed.Status,
+		Progress:           parsed.Progress,
+		Seconds:            parsed.Seconds,
+		Size:               parsed.Size,
+		VideoURL:           parsed.VideoURL,
+		Error:              parsed.Error,
+		ErrorDetail:        parsed.ErrorDetail,
+		RequestBody:        logContext.RequestBody,
+		ResponseBody:       string(transformed),
+		Credits:            credits,
 	})
 	if err != nil {
 		log.Printf("save video task failed: model=%s err=%v", modelName, err)
@@ -239,41 +253,56 @@ func serveAIVideoTask(w http.ResponseWriter, r *http.Request, id string) bool {
 	return true
 }
 
-func serveGeminiVideoTaskContent(w http.ResponseWriter, r *http.Request, id string) bool {
+func serveAIVideoTaskContent(w http.ResponseWriter, r *http.Request, id string) bool {
 	user, ok := service.UserFromContext(r.Context())
 	if !ok {
-		return false
-	}
-	task, found, err := service.GetUserVideoTask(user.ID, strings.TrimSpace(id))
-	if err != nil || !found {
-		return false
-	}
-	var channel model.ModelChannel
-	if strings.TrimSpace(task.UserChannelID) != "" {
-		channel, err = service.SelectUserLocalModelChannelForModel(task.UserID, task.Model, task.UserChannelID)
-	} else {
-		channel, err = service.SelectModelChannelForModel(task.Model, task.ChannelID)
-	}
-	if err != nil || !service.IsGeminiChannel(channel) {
-		return false
-	}
-	if strings.TrimSpace(task.VideoURL) == "" {
-		Fail(w, "Gemini Veo 任务完成但没有返回视频地址")
+		FailWithStatus(w, http.StatusUnauthorized, "未登录或权限不足")
 		return true
 	}
-	request, err := http.NewRequest(http.MethodGet, task.VideoURL, nil)
+	task, found, err := service.GetUserVideoTask(user.ID, strings.TrimSpace(id))
+	if err != nil {
+		Fail(w, "视频任务读取失败")
+		return true
+	}
+	if !found {
+		FailWithStatus(w, http.StatusNotFound, "视频任务不存在")
+		return true
+	}
+	channel, err := service.ResolveVideoTaskChannel(task)
+	if err != nil {
+		FailWithStatus(w, http.StatusConflict, err.Error())
+		return true
+	}
+	endpoint := "/videos/" + firstNonEmpty(task.UpstreamVideoID, task.UpstreamTaskID, task.ID) + "/content"
+	target := resolveAIProxyURL(channel, task.Model, resolveAIProxyPath(channel, task.Model, endpoint))
+	if service.IsGeminiChannel(channel) {
+		if strings.TrimSpace(task.VideoURL) == "" {
+			Fail(w, "Gemini Veo 任务完成但没有返回视频地址")
+			return true
+		}
+		target = task.VideoURL
+	}
+	baseURL, baseErr := url.Parse(channel.BaseURL)
+	contentURL, contentErr := url.Parse(target)
+	if baseErr != nil || contentErr != nil || contentURL.User != nil || contentURL.Scheme != baseURL.Scheme || !strings.EqualFold(contentURL.Host, baseURL.Host) {
+		FailWithStatus(w, http.StatusConflict, "视频下载地址与任务来源不一致，已停止发送凭据")
+		return true
+	}
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
 	if err != nil {
 		Fail(w, "视频内容下载失败")
 		return true
 	}
 	service.SetModelChannelAuthHeader(request, channel)
-	response, err := service.HTTPClientForChannel(channel).Do(request)
+	client := *service.HTTPClientForChannel(channel)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(request)
 	if err != nil {
 		Fail(w, "视频内容下载失败")
 		return true
 	}
 	defer response.Body.Close()
-	if response.StatusCode >= http.StatusBadRequest {
+	if response.StatusCode >= http.StatusMultipleChoices {
 		Fail(w, readUpstreamAIErrorMessage(nil, response.StatusCode))
 		return true
 	}
@@ -286,13 +315,7 @@ func serveGeminiVideoTaskContent(w http.ResponseWriter, r *http.Request, id stri
 }
 
 func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdate, error) {
-	var channel model.ModelChannel
-	var err error
-	if strings.TrimSpace(task.UserChannelID) != "" {
-		channel, err = service.SelectUserLocalModelChannelForModel(task.UserID, task.Model, task.UserChannelID)
-	} else {
-		channel, err = service.SelectModelChannelForModel(task.Model, task.ChannelID)
-	}
+	channel, err := service.ResolveVideoTaskChannel(task)
 	if err != nil {
 		return service.VideoTaskPollUpdate{}, err
 	}

@@ -343,7 +343,17 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
     const aiccReferences = [...input.references, ...input.videoReferences, ...input.audioReferences, input.firstFrame, input.lastFrame].filter(item => item?.aiccUri);
-    if (aiccReferences.length && !model.toLowerCase().includes("seedance")) throw new VideoRequestError("人物资产仅支持 Seedance 视频模型，请切换模型或移除人物素材");
+    if (aiccReferences.length) {
+        if (!model.toLowerCase().includes("seedance")) throw new VideoRequestError("移动云素材仅支持 Seedance 视频模型，请切换模型或移除素材");
+        if (!usesAccountProxy(config) || !useUserStore.getState().token) throw new VideoRequestError("请登录后使用移动云素材，素材归属由服务端校验");
+        if (aiccReferences.some(item => !Number.isSafeInteger(item?.aiccChannelId) || (item?.aiccChannelId ?? 0) <= 0)) {
+            throw new VideoRequestError("素材来源信息缺失，请从移动云素材库重新选择");
+        }
+        // The gateway resolves the account from owned asset IDs; model channel IDs use a different namespace.
+        if (new Set(aiccReferences.map(item => item?.aiccChannelId)).size > 1) {
+            throw new VideoRequestError("这些素材来自不同渠道，当前无法确认账号一致，请选择同一渠道的素材");
+        }
+    }
     const size = normalizeVideoSize(config.size);
     if (isGeminiVideoModel(model) && isGeminiConfig(config, model)) return createGeminiVeoRequestBody(config, model, prompt, input);
     if (isGrok2APIVideoConfig(config, model)) return createGrok2APIVideoRequestBody(config, model, prompt, input);

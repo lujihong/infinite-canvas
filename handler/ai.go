@@ -21,18 +21,8 @@ const userModelChannelHeader = "X-User-Model-Channel-ID"
 
 func selectAIRequestChannel(user model.AuthUser, modelName string, channelID string, userChannelID string) (model.ModelChannel, string, error) {
 	// 1. 优先提取当前用户专属绑定的 New-API 令牌 (全自动打通模型中转站，用户无需且无法配置)
-	if userToken := service.GetUserExclusiveNewAPIToken(user.ID); userToken != "" {
-		return model.ModelChannel{
-			ID:       "xyb-official-exclusive",
-			Protocol: "openai",
-			Name:     "鑫元宝官方模型服务",
-			BaseURL:  "https://api.xybcloud.com/",
-			APIKey:   userToken,
-			Models:   []string{"*"},
-			Weight:   1,
-			Timeout:  600,
-			Enabled:  true,
-		}, "xyb-official-exclusive", nil
+	if channel, err := service.AICCVideoChannel(user.ID); err == nil {
+		return channel, "xyb-official-exclusive", nil
 	}
 
 	userChannelID = strings.TrimSpace(userChannelID)
@@ -96,7 +86,7 @@ func AIVideo(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func AIVideoContent(w http.ResponseWriter, r *http.Request, id string) {
-	if serveGeminiVideoTaskContent(w, r, id) {
+	if serveAIVideoTaskContent(w, r, id) {
 		return
 	}
 	proxyAIGetRequest(w, r, "/videos/"+id+"/content")
@@ -571,6 +561,11 @@ func agnesVideoQueryID(modelName string, path string) (string, bool) {
 }
 
 func resolveAIProxyPath(channel model.ModelChannel, modelName string, path string) string {
+	// The gateway owns provider adaptation; forwarding its video API must not
+	// reinterpret a model name as a direct vendor protocol.
+	if channel.ID == "xyb-official-exclusive" && (path == "/videos" || strings.HasPrefix(path, "/videos/")) {
+		return path
+	}
 	if service.IsGeminiChannel(channel) {
 		switch path {
 		case "/chat/completions":

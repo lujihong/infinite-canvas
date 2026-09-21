@@ -81,8 +81,11 @@ func SelectUserLocalModelChannelForModel(userID string, modelName string, channe
 				break
 			}
 		}
+		if targetChannel == nil {
+			return model.ModelChannel{}, errors.New("本地渠道不存在")
+		}
 	}
-	// 如果未指定 channelID 或没找到，尝试通过 modelName 匹配
+	// 未指定 channelID 时尝试通过 modelName 匹配
 	if targetChannel == nil && modelName != "" {
 		for i := range modelConfig.LocalChannels {
 			models := userLocalChannelModels(modelConfig.LocalChannels[i].Models)

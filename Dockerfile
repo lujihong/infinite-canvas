@@ -7,10 +7,11 @@ RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lock
 COPY VERSION /app/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY web ./
-RUN bun run build
+RUN NODE_OPTIONS=--max-old-space-size=1000 bun run build
 
 # 构建 Go 后端入口。
 FROM golang:1.25-alpine AS api-build
+ENV GOPROXY=https://goproxy.cn,direct GOMAXPROCS=1 GOFLAGS=-p=1
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -40,7 +41,8 @@ ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 ENV PROMPT_DATA_DIR=/app/data/prompts
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+ARG DEBIAN_MIRROR=deb.debian.org
+RUN sed -i "s/deb.debian.org/${DEBIAN_MIRROR}/g" /etc/apt/sources.list.d/debian.sources && apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /app/data/prompts
 
 EXPOSE 3000

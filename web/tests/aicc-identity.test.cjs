@@ -20,7 +20,7 @@ test('switching users remounts real AICC component and releases pending authenti
  const ui=Object.fromEntries(Object.entries(tags).map(([key,tag])=>[key,({children})=>React.createElement(tag,null,children)]));
  ui.Button=({children,loading,onClick,disabled})=>React.createElement('button',{onClick,disabled,'data-loading':String(!!loading)},children);
  ui.App={useApp:()=>({message:{success(){},info(){},error(){}}})};
- const modules={react:React,'react/jsx-runtime':require('react/jsx-runtime'),antd:ui,'@tanstack/react-query':{useQuery:()=>({data:{data:[]},refetch:async()=>{},isLoading:false,isFetching:false})},'@/stores/use-user-store':{useUserStore:select=>select({user:{id:identity}})},'@/services/api/aicc':{aiccSession:s=>{signal=s;return new Promise(resolve=>{settle=resolve});}}};
+ const modules={'lucide-react':{Radio:()=>null},react:React,'react/jsx-runtime':require('react/jsx-runtime'),antd:ui,'@tanstack/react-query':{useQuery:opts=>({data:opts.queryKey[0]==='aicc-channels'?[{id:6,name:'移动云',models:[]}]:{data:[]},refetch:async()=>{},isLoading:false,isPending:false,isFetching:false})},'@/stores/use-user-store':{useUserStore:select=>select({user:{id:identity}})},'@/services/api/aicc':{aiccSession:s=>{signal=s;return new Promise(resolve=>{settle=resolve});}}};
  const source=fs.readFileSync(path.join(__dirname,'../src/components/aicc/asset-picker.tsx'),'utf8');
  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
  const scope={exports:{},require:id=>modules[id]||{},AbortController,Date,setInterval,clearInterval};

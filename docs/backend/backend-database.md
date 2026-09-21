@@ -185,6 +185,12 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 | `model` | string | 模型名称 |
 | `channel_id` | string | 模型渠道 ID |
 | `channel_name` | string | 模型渠道名称 |
+| `user_channel_id` | string | 用户本地渠道 ID；官方专属来源固定为 `xyb-official-exclusive` |
+| `source_kind` | string | 提交前冻结的真实渠道来源：`official`、`user-local`、`public` |
+| `gateway_base_url` | string | 提交前冻结的实际网关/渠道 BaseURL，去除末尾斜线 |
+| `gateway_user_id` | string | 官方专属来源绑定的网关用户 ID，来自用户 Extra，不存 token |
+| `channel_identity` | string | 实际使用的渠道 ID，后续必须精确匹配，禁止回退首渠道 |
+| `channel_fingerprint` | string | 提交前渠道 ID、地址、协议与凭据的 SHA-256 指纹；官方专属令牌不纳入，改由网关用户 ID 校验。非官方换 Key 必须拒绝旧任务，不推测为同账号轮换；此字段不返回客户端 |
 | `source` | string | 任务来源：`video-workbench`、`canvas` |
 | `source_id` | string | 来源内 ID，画布任务记录画布节点 ID，视频创作台为空 |
 | `upstream_task_id` | string | 上游任务 ID |
@@ -207,6 +213,8 @@ S3/R2 与 WebDAV 共用的媒体文件索引表，不保存画布、素材列表
 | `last_polled_at` | string | 最近轮询时间 |
 
 后台轮询器按 `status + created_at` 查询未完成任务；旧数据库中如果残留废弃列，不再参与代码查询。
+
+渠道快照在发起上游创建请求前冻结，提交成功后随任务保存。轮询和内容下载统一校验来源、渠道 ID 与 BaseURL；官方来源还须校验当前用户绑定的网关用户 ID，仅允许同身份 token 轮换。任务表不保存 token。来源快照缺失、绑定解除或配置变化时不请求上游、不回退本地/公共渠道，保留原任务状态和预扣积分，API 返回 `video_task_channel_configuration` 可恢复错误。恢复原绑定/配置后可继续；缺快照旧任务须恢复原始快照，禁止用当前配置猜测补齐。
 
 ### video_generation_logs
 

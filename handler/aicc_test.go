@@ -5,8 +5,25 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
+
+func TestAICCChannelQueryValidation(t *testing.T) {
+	for _, raw := range []string{"channel_id=0", "channel_id=00", "channel_id=-1", "channel_id=abc", "channel_id=2147483648", "channel_id=", "channel_id=6&channel_id=7"} {
+		values, err := url.ParseQuery(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := parseAICCChannelQuery(values); err == nil {
+			t.Fatalf("accepted invalid query %s", raw)
+		}
+	}
+	values, err := parseAICCChannelQuery(url.Values{"channel_id": {"6", "6"}, "groupIds": {"group-a"}})
+	if err != nil || values.Get("channel_id") != "6" || values.Get("groupIds") != "group-a" {
+		t.Fatalf("lost valid scope: %v %v", values, err)
+	}
+}
 
 func TestAICCUploadOnlyAcceptsPost(t *testing.T) {
 	if !validAICCOperation("POST", "uploads") {

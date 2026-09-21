@@ -2254,15 +2254,21 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             }
             if (node.type === CanvasNodeType.Video) {
                 if (!node.metadata?.content) return message.error("没有可保存的视频");
-                addAsset({ kind: "video", title: node.metadata?.prompt?.slice(0, 24) || "画布视频", coverUrl: "", tags: [], source: "Canvas", data: { url: node.metadata.content, storageKey: node.metadata.storageKey, width: node.width, height: node.height, bytes: node.metadata.bytes || 0, mimeType: node.metadata.mimeType || "video/mp4" }, metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt } });
+                addAsset({ kind: "video", title: node.metadata?.prompt?.slice(0, 24) || "画布视频", coverUrl: "", tags: [], source: "Canvas", data: { url: node.metadata.content, storageKey: node.metadata.aiccUri ? undefined : node.metadata.storageKey, aiccUri: node.metadata.aiccUri, aiccChannelId: node.metadata.aiccChannelId, width: node.metadata.naturalWidth || node.width, height: node.metadata.naturalHeight || node.height, bytes: node.metadata.bytes || 0, mimeType: node.metadata.mimeType || "video/mp4" }, metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt } });
+                message.success("已加入我的素材");
+                return;
+            }
+            if (node.type === CanvasNodeType.Audio) {
+                if (!node.metadata?.content) return message.error("没有可保存的音频");
+                addAsset({ kind: "audio", title: node.metadata.prompt?.slice(0, 24) || "画布音频", coverUrl: "", tags: [], source: "Canvas", data: { url: node.metadata.content, storageKey: node.metadata.aiccUri ? undefined : node.metadata.storageKey, aiccUri: node.metadata.aiccUri, aiccChannelId: node.metadata.aiccChannelId, bytes: node.metadata.bytes, mimeType: node.metadata.mimeType || "audio/mpeg", durationMs: node.metadata.durationMs }, metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata.prompt } });
                 message.success("已加入我的素材");
                 return;
             }
             if (!node.metadata?.content) return message.error("没有可保存的图片");
             try {
-                const stored = !node.metadata.storageKey && node.metadata.content.startsWith("blob:") ? await uploadImage(node.metadata.content, { localOnly: true }) : null;
+                const stored = !node.metadata.aiccUri && !node.metadata.storageKey && node.metadata.content.startsWith("blob:") ? await uploadImage(node.metadata.content, { localOnly: true }) : null;
                 const imageUrl = stored?.url || node.metadata.content;
-                const storageKey = stored?.storageKey || node.metadata.storageKey;
+                const storageKey = node.metadata.aiccUri ? undefined : stored?.storageKey || node.metadata.storageKey;
                 const dataUrl = storageKey ? "" : imageUrl;
                 addAsset({
                     kind: "image",
@@ -2273,6 +2279,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     data: {
                         dataUrl,
                         storageKey,
+                        aiccUri: node.metadata.aiccUri,
+                        aiccChannelId: node.metadata.aiccChannelId,
                         width: stored?.width || node.metadata.naturalWidth || node.width,
                         height: stored?.height || node.metadata.naturalHeight || node.height,
                         bytes: stored?.bytes || node.metadata.bytes || getDataUrlByteSize(dataUrl),
@@ -2584,13 +2592,13 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     if (isAudioFile(file)) {
                         const audio = await uploadMediaFile(file, "audio");
                         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
-                        setNodes((prev) => prev.map((node) => (node.id === target.nodeId ? { ...node, type: CanvasNodeType.Audio, title: file.name, position: { x: node.position.x + node.width / 2 - spec.width / 2, y: node.position.y + node.height / 2 - spec.height / 2 }, width: spec.width, height: spec.height, metadata: { ...node.metadata, ...audioMetadata(audio), errorDetails: undefined } } : node)));
+                        setNodes((prev) => prev.map((node) => (node.id === target.nodeId ? { ...node, type: CanvasNodeType.Audio, title: file.name, position: { x: node.position.x + node.width / 2 - spec.width / 2, y: node.position.y + node.height / 2 - spec.height / 2 }, width: spec.width, height: spec.height, metadata: { ...node.metadata, ...REPLACED_MEDIA_METADATA, ...audioMetadata(audio) } } : node)));
                         setSelectedNodeIds(new Set([target.nodeId]));
                         setSelectedConnectionId(null);
                     } else if (file.type.startsWith("video/")) {
                         const video = await uploadMediaFile(file, "video");
                         const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        setNodes((prev) => prev.map((node) => (node.id === target.nodeId ? { ...node, type: CanvasNodeType.Video, title: file.name, position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { ...node.metadata, ...videoMetadata(video), errorDetails: undefined } } : node)));
+                        setNodes((prev) => prev.map((node) => (node.id === target.nodeId ? { ...node, type: CanvasNodeType.Video, title: file.name, position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { ...node.metadata, ...REPLACED_MEDIA_METADATA, ...videoMetadata(video) } } : node)));
                         setSelectedNodeIds(new Set([target.nodeId]));
                         setSelectedConnectionId(null);
                         setDialogNodeId(target.nodeId);
@@ -2611,26 +2619,13 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                     height: nextSize.height,
                                     metadata: {
                                         ...node.metadata,
+                                        ...REPLACED_MEDIA_METADATA,
                                         ...imageMetadata(image),
-                                        errorDetails: undefined,
-                                        freeResize: false,
-                                        isBatchRoot: undefined,
-                                        batchRootId: undefined,
-                                        batchChildIds: undefined,
-                                        batchUsesReferenceImages: undefined,
-                                        generationType: undefined,
                                         model: isPanorama ? node.metadata?.model : undefined,
                                         size: isPanorama ? PANORAMA_IMAGE_SIZE : undefined,
                                         quality: isPanorama ? node.metadata?.quality : undefined,
                                         count: isPanorama ? node.metadata?.count : undefined,
-                                        references: undefined,
-                                        primaryImageId: undefined,
-                                        imageBatchExpanded: undefined,
-                                        imageTaskId: undefined,
-                                        imageTaskResultId: undefined,
                                         panoramaSourcePrompt: isPanorama ? node.metadata?.panoramaSourcePrompt : undefined,
-                                        panoramaFinalPrompt: undefined,
-                                        panoramaProjection: undefined,
                                     },
                                 };
                             }),
@@ -2667,7 +2662,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const spec = NODE_DEFAULT_SIZE[type];
             const id = nodeId || `aicc-${Date.now()}-${nanoid()}`;
             const preview = payload.kind === "image" ? payload.dataUrl : payload.url;
-            setNodes(prev => [...prev, {id, type, title: payload.title, position: {x:center.x-spec.width/2,y:center.y-spec.height/2}, width:spec.width,height:spec.height, metadata:{content:preview,aiccUri:payload.aiccUri,status:NODE_STATUS_SUCCESS,mimeType:payload.mimeType}}]);
+            setNodes(prev => [...prev, {id, type, title: payload.title, position: {x:center.x-spec.width/2,y:center.y-spec.height/2}, width:spec.width,height:spec.height, metadata:{content:preview,aiccUri:payload.aiccUri,aiccChannelId:payload.aiccChannelId,status:NODE_STATUS_SUCCESS,mimeType:payload.mimeType}}]);
             setSelectedNodeIds(new Set([id]));
             setSelectedConnectionId(null);
             return;
@@ -2676,7 +2671,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
             const id = nodeId || `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const nextSize = fitNodeSize(payload.width || spec.width, payload.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-            setNodes((prev) => [...prev, { id, type: CanvasNodeType.Video, title: payload.title, position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height } }]);
+            setNodes((prev) => [...prev, { id, type: CanvasNodeType.Video, title: payload.title, position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { content: payload.url, storageKey: payload.storageKey, aiccUri: payload.aiccUri, aiccChannelId: payload.aiccChannelId, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height } }]);
             setSelectedNodeIds(new Set([id]));
             setSelectedConnectionId(null);
             return;
@@ -2684,7 +2679,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         if (payload.kind === "audio") {
             const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
             const id = nodeId || `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-            setNodes((prev) => [...prev, { id, type: CanvasNodeType.Audio, title: payload.title, position: { x: center.x - spec.width / 2, y: center.y - spec.height / 2 }, width: spec.width, height: spec.height, metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, bytes: payload.bytes, mimeType: payload.mimeType || "audio/mpeg", durationMs: payload.durationMs } }]);
+            setNodes((prev) => [...prev, { id, type: CanvasNodeType.Audio, title: payload.title, position: { x: center.x - spec.width / 2, y: center.y - spec.height / 2 }, width: spec.width, height: spec.height, metadata: { content: payload.url, storageKey: payload.storageKey, aiccUri: payload.aiccUri, aiccChannelId: payload.aiccChannelId, status: NODE_STATUS_SUCCESS, bytes: payload.bytes, mimeType: payload.mimeType || "audio/mpeg", durationMs: payload.durationMs } }]);
             setSelectedNodeIds(new Set([id]));
             setSelectedConnectionId(null);
             return;
@@ -3092,17 +3087,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const firstFrame = frameReferencesEnabled ? generationContext.firstFrame : null;
                     const lastFrame = frameReferencesEnabled ? generationContext.lastFrame : null;
                     const videoReferenceImages = frameReferencesEnabled ? generationContext.referenceImages : [...generationContext.referenceImages, ...[generationContext.firstFrame, generationContext.lastFrame].filter((image): image is ReferenceImage => Boolean(image))];
-                    const targetAiccChannelId = [
-                        firstFrame?.aiccChannelId,
-                        lastFrame?.aiccChannelId,
-                        ...videoReferenceImages.map((img) => img.aiccChannelId),
-                        ...generationContext.referenceVideos.map((v) => v.aiccChannelId),
-                        ...generationContext.referenceAudios.map((a) => a.aiccChannelId),
-                    ].find((id): id is number => Boolean(id && id > 0));
-
-                    const effectiveVideoConfig = targetAiccChannelId
-                        ? { ...videoGenerationConfig, videoChannelId: String(targetAiccChannelId), activeChannelId: String(targetAiccChannelId) }
-                        : videoGenerationConfig;
+                    const effectiveVideoConfig = videoGenerationConfig;
                     const spec = nodeSizeFromRatio(effectiveVideoConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
@@ -3969,10 +3954,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const references: CanvasAssistantReference[] = [];
             for (const [index, asset] of request.assets.entries()) {
                 let payload = asset.payload;
-                if (payload.kind === "image" && payload.storageKey) {
+                if (payload.kind === "image" && payload.storageKey && !payload.aiccUri) {
                     const dataUrl = await resolveImageUrl(payload.storageKey, payload.dataUrl);
                     payload = { ...payload, dataUrl };
-                } else if ((payload.kind === "video" || payload.kind === "audio") && payload.storageKey) {
+                } else if ((payload.kind === "video" || payload.kind === "audio") && payload.storageKey && !payload.aiccUri) {
                     const url = await resolveMediaUrl(payload.storageKey, payload.url);
                     payload = { ...payload, url };
                 }
@@ -4028,18 +4013,29 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         (payload: InsertAssetPayload) => {
             const replacingNodeId = replacingNodeIdRef.current;
             const referenceTargetNodeId = referenceTargetNodeIdRef.current;
-            replacingNodeIdRef.current = null;
-            referenceTargetNodeIdRef.current = null;
+            if ((replacingNodeId || referenceTargetNodeId) && payload.kind === "text") {
+                message.warning("请选择图片、视频或音频素材，文本不能用于替换媒体或添加媒体参考");
+                return;
+            }
             const aiccUri = "aiccUri" in payload ? payload.aiccUri : undefined;
             const mimeType = "mimeType" in payload ? payload.mimeType : undefined;
 
             // 1. 替换现有节点逻辑
-            if (replacingNodeId) {
-                setAssetPickerOpen(false);
+            if (replacingNodeId && payload.kind !== "text") {
                 const targetNode = nodesRef.current.find((n) => n.id === replacingNodeId);
-                if (!targetNode) return;
+                if (!targetNode) {
+                    message.warning("目标节点已不存在，请重新选择替换目标");
+                    return;
+                }
+                if (isPanoramaNodeType(targetNode.type) && payload.kind !== "image") {
+                    message.warning("全景图节点仅支持选择图片");
+                    return;
+                }
+                replacingNodeIdRef.current = null;
+                referenceTargetNodeIdRef.current = null;
+                setAssetPickerOpen(false);
 
-                const nextPreview = payload.kind === "image" ? payload.dataUrl : (payload.kind === "video" || payload.kind === "audio" ? payload.url : payload.content);
+                const nextPreview = payload.kind === "image" ? payload.dataUrl : payload.url;
                 const nextType = payload.kind === "image"
                     ? (isPanoramaNodeType(targetNode.type) ? CanvasNodeType.Panorama : CanvasNodeType.Image)
                     : payload.kind === "video"
@@ -4057,29 +4053,39 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             title: payload.title || node.title,
                             metadata: {
                                 ...node.metadata,
+                                ...REPLACED_MEDIA_METADATA,
                                 content: nextPreview,
+                                storageKey: aiccUri ? undefined : payload.storageKey,
                                 aiccUri,
+                                aiccChannelId: "aiccChannelId" in payload ? payload.aiccChannelId : undefined,
                                 mimeType: mimeType || (payload.kind === "image" ? "image/jpeg" : payload.kind === "video" ? "video/mp4" : "audio/mpeg"),
-                                status: NODE_STATUS_SUCCESS,
-                                errorDetails: undefined,
+                                bytes: "bytes" in payload ? payload.bytes : undefined,
+                                durationMs: "durationMs" in payload ? payload.durationMs : undefined,
+                                naturalWidth: "width" in payload ? payload.width : undefined,
+                                naturalHeight: "height" in payload ? payload.height : undefined,
                             },
                         };
                     }),
                 );
-                message.success(aiccUri ? "已成功替换为移动云已认证的真人素材" : "已成功替换素材");
+                message.success(aiccUri ? "已替换为移动云素材" : "已成功替换素材");
                 return;
             }
 
             // 2. 作为参考内容添加到目标节点（自动在左侧新建素材节点并连线）
-            if (referenceTargetNodeId) {
-                setAssetPickerOpen(false);
+            if (referenceTargetNodeId && payload.kind !== "text") {
                 const targetNode = nodesRef.current.find((n) => n.id === referenceTargetNodeId);
-                if (!targetNode) return;
+                if (!targetNode) {
+                    message.warning("目标节点已不存在，请重新选择参考目标");
+                    return;
+                }
+                replacingNodeIdRef.current = null;
+                referenceTargetNodeIdRef.current = null;
+                setAssetPickerOpen(false);
 
                 const type = payload.kind === "image" ? CanvasNodeType.Image : payload.kind === "video" ? CanvasNodeType.Video : CanvasNodeType.Audio;
                 const spec = NODE_DEFAULT_SIZE[type];
                 const newAssetId = aiccUri ? `aicc-${Date.now()}-${nanoid()}` : `ref-${Date.now()}-${nanoid()}`;
-                const preview = payload.kind === "image" ? payload.dataUrl : (payload.kind === "video" || payload.kind === "audio" ? payload.url : payload.content);
+                const preview = payload.kind === "image" ? payload.dataUrl : payload.url;
 
                 const newPos = {
                     x: targetNode.position.x - spec.width - 96,
@@ -4089,21 +4095,27 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 const newAssetNode: CanvasNodeData = {
                     id: newAssetId,
                     type,
-                    title: payload.title || (aiccUri ? "已认证真人素材" : "参考素材"),
+                    title: payload.title || (aiccUri ? "移动云素材" : "参考素材"),
                     position: newPos,
                     width: spec.width,
                     height: spec.height,
                     metadata: {
                         content: preview,
+                        storageKey: aiccUri ? undefined : payload.storageKey,
                         aiccUri,
+                        aiccChannelId: "aiccChannelId" in payload ? payload.aiccChannelId : undefined,
                         status: NODE_STATUS_SUCCESS,
                         mimeType,
+                        bytes: "bytes" in payload ? payload.bytes : undefined,
+                        durationMs: "durationMs" in payload ? payload.durationMs : undefined,
+                        naturalWidth: "width" in payload ? payload.width : undefined,
+                        naturalHeight: "height" in payload ? payload.height : undefined,
                     },
                 };
 
                 setNodes((prev) => [...prev, newAssetNode]);
                 setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: newAssetId, toNodeId: referenceTargetNodeId }]);
-                message.success(aiccUri ? "已添加真人素材并自动关联为参考内容" : "已添加参考素材并自动关联连线");
+                message.success(aiccUri ? "已添加移动云素材并关联为参考内容" : "已添加参考素材并自动关联连线");
                 return;
             }
 
@@ -4148,6 +4160,34 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         },
         [size.height, size.width, toggleBatchExpanded],
     );
+
+    const handleRepairAiccReference = useCallback((node: CanvasNodeData) => {
+        const currentNodes = nodesRef.current;
+        const incoming = (id: string) => currentNodes.filter((item) => connectionsRef.current.some((edge) => edge.toNodeId === id && edge.fromNodeId === item.id));
+        const batchRoot = currentNodes.find((item) => item.id === node.metadata?.batchRootId);
+        const result = batchRoot || node;
+        const parents = incoming(result.id);
+        const sources = parents.filter((item) => item.type === CanvasNodeType.Config);
+        // 只有唯一配置源才可定位；多源时保留原图，交由用户明确选择参考。
+        const source = result.type === CanvasNodeType.Config ? result : sources.length === 1 ? sources[0] : result;
+        const inputs = (source.id === result.id ? parents : incoming(source.id)).filter((item) =>
+            (isCanvasImageNodeType(item.type) || item.type === CanvasNodeType.Video || item.type === CanvasNodeType.Audio) &&
+            item.metadata?.status !== NODE_STATUS_ERROR && Boolean(item.metadata?.content || item.metadata?.aiccUri),
+        );
+        if (sources.length <= 1 && inputs.length === 1) {
+            focusNode(inputs[0].id);
+            setDialogNodeId(inputs[0].id);
+            handleReplaceMedia(inputs[0], "aicc");
+            message.info("请选择移动云素材修复该参考输入；失败结果与原始错误会保留，请确认后手动生成");
+            return;
+        }
+        focusNode(source.id);
+        setDialogNodeId(source.id);
+        handleOpenAiccForReference(source.id);
+        message.info(inputs.length > 1 || sources.length > 1
+            ? "存在多个输入，请明确添加移动云参考素材，并在参考栏手动移除不适用的输入；不会自动重试"
+            : "请添加移动云参考素材，确认输入后手动生成；失败结果与原始错误会保留");
+    }, [focusNode, handleOpenAiccForReference, handleReplaceMedia, message]);
 
     useEffect(() => () => {
         if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
@@ -4353,7 +4393,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}
                             onRetry={(node) => void handleRetryNode(node)}
-                            onReplaceAicc={(node) => handleReplaceMedia(node, "aicc")}
+                            onReplaceAicc={handleRepairAiccReference}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
                             onSelectReference={selectNodeReference}
                             onContextMenu={(event, id) => {
@@ -5110,6 +5150,46 @@ function audioExtension(mimeType?: string) {
     return "mp3";
 }
 
+// 替换媒体时统一清除上一份素材的身份、任务和批次状态，保留节点提示词与生成配置。
+const REPLACED_MEDIA_METADATA: CanvasNodeMetadata = {
+    content: undefined,
+    storageKey: undefined,
+    aiccUri: undefined,
+    aiccChannelId: undefined,
+    mimeType: undefined,
+    bytes: undefined,
+    durationMs: undefined,
+    naturalWidth: undefined,
+    naturalHeight: undefined,
+    imageTaskId: undefined,
+    imageTaskResultId: undefined,
+    videoTaskId: undefined,
+    videoTaskVideoId: undefined,
+    audioTaskId: undefined,
+    audioTaskResultId: undefined,
+    startedAt: undefined,
+    progress: undefined,
+    references: undefined,
+    batchRootId: undefined,
+    batchChildIds: undefined,
+    isBatchRoot: undefined,
+    batchUsesReferenceImages: undefined,
+    primaryImageId: undefined,
+    imageBatchExpanded: undefined,
+    generationType: undefined,
+    firstFrameNodeId: undefined,
+    lastFrameNodeId: undefined,
+    klingImageNodeIds: undefined,
+    klingMultiPrompt: undefined,
+    klingElementList: undefined,
+    mimoVoiceCloneAudioNodeId: undefined,
+    panoramaFinalPrompt: undefined,
+    panoramaProjection: undefined,
+    freeResize: false,
+    status: NODE_STATUS_SUCCESS,
+    errorDetails: undefined,
+};
+
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
 }
@@ -5239,6 +5319,7 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     return Promise.all(
         nodes.map(async (node) => {
             const content = node.metadata?.content;
+            if (node.metadata?.aiccUri) return { ...node, metadata: { ...node.metadata, storageKey: undefined } };
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) {
                 return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
             }

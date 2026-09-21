@@ -57,8 +57,8 @@ async function setup(options = {}) {
     const groupData = { data: [{ groupId: 'group-1', groupName: '本人', groupType: 'LivenessFace' }, { groupId: 'group-2', groupName: '另一个组', groupType: 'LivenessFace' }] };
     const assetData = { data: [{ assetId: 'asset-active', assetName: '已入库', assetType: 'Image', status: 'ACTIVE', assetUrl: 'https://preview.example/a.png' }, { assetId: 'asset-video', assetName: '视频', assetType: 'Video', status: 'PROCESSING', assetUrl: 'https://preview.example/a.mp4' }, { assetId: 'asset-audio', assetName: '音频', assetType: 'Audio', status: 'ACTIVE', assetUrl: 'https://preview.example/a.wav' }] };
     const queryOptions = [];
-    const modules = { react: React, 'react/jsx-runtime': require('react/jsx-runtime'), antd: ui,
-        '@tanstack/react-query': { useQuery: opts => { queryOptions.push(opts); return { data: opts.queryKey.includes('groups') ? groupData : assetData, refetch: async () => {}, isLoading: false, isFetching: false, dataUpdatedAt: 0 }; } },
+    const modules = { react: React, 'react/jsx-runtime': require('react/jsx-runtime'), antd: ui, 'lucide-react': { Radio: () => null },
+        '@tanstack/react-query': { useQuery: opts => { queryOptions.push(opts); return { data: opts.queryKey[0] === 'aicc-channels' ? [{id:6,name:'移动云',models:[]}] : opts.queryKey.includes('groups') ? groupData : {data:assetData.data.map(asset=>({...asset,channelId:6}))}, refetch: async () => {}, isPending: false, isLoading: false, isFetching: false, dataUpdatedAt: 0 }; } },
         '@/stores/use-user-store': { useUserStore: store }, '@/services/api/aicc': api,
     };
     const picker = load('components/aicc/asset-picker.tsx', modules, { document, URL: dom.window.URL });
@@ -114,6 +114,8 @@ test('real file control is clickable and two-step multipart upload uses workbenc
         assert.equal(upload.data.get('assetType'), 'Image');
         assert.equal(create.data.assetUrl, 'https://private.example/signed');
         assert.equal(create.data.groupId, 'group-1');
+        assert.equal(upload.params.channel_id,6);
+        assert.equal(create.params.channel_id,6);
         assert.equal(upload.signal, create.signal);
         assert.ok(upload.timeout > 0 && create.timeout > 0);
         assert.equal(h.button('提交入库').disabled, true);
@@ -192,7 +194,7 @@ for (const change of ['cancel', 'group', 'type', 'file', 'user']) {
 test('disabled selection still permits authentication, upload, group management; insert stays blocked', async () => {
     const h = await setup({ selectionEnabled: false });
     try {
-        assert.match(document.body.textContent, /切换 Seedance 后再选用/);
+        assert.match(document.body.textContent, /先选择支持的 Seedance 模型/);
         assert.equal(h.button('发起真人认证').disabled, false);
         assert.ok([...document.querySelectorAll('button')].filter(el => el.textContent === '选用此素材').every(el => el.disabled));
         await h.choose();

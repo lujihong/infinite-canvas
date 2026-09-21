@@ -163,8 +163,6 @@ export default function VideoPage() {
     const pollingLogIdsRef = useRef(new Set<string>());
     const logsRef = useRef<GenerationLog[]>([]);
     const effectiveConfigRef = useRef(videoConfig);
-    const previousModelRef = useRef<string | null>(null);
-
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const aiccSelectionEnabled = isSeedanceVideoConfig({ ...videoConfig, model });
     const canGenerate = Boolean(prompt.trim());
@@ -657,21 +655,6 @@ export default function VideoPage() {
         }
         const frameReferencesEnabled = !kling && supportsVideoFrameReferences(modelValue, channelProtocolForConfig({ ...configValue, model: modelValue }));
         let normalizedConfig = buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue);
-        const targetAiccChannelId = [
-            firstFrameItem?.aiccChannelId,
-            lastFrameItem?.aiccChannelId,
-            ...referenceItems.map((img) => img.aiccChannelId),
-            ...videoReferenceItems.map((v) => v.aiccChannelId),
-            ...audioReferenceItems.map((a) => a.aiccChannelId),
-        ].find((id): id is number => Boolean(id && id > 0));
-
-        if (targetAiccChannelId) {
-            normalizedConfig = {
-                ...normalizedConfig,
-                videoChannelId: String(targetAiccChannelId),
-                activeChannelId: String(targetAiccChannelId),
-            };
-        }
         if (omni === "reference-to-video" && videoReferenceItems.length) normalizedConfig.videoGenerateAudio = "false";
         const imageReferences = omni === "text-to-video" ? [] : omni === "reference-to-video" ? [...referenceItems] : [...referenceItems].slice(0, kling ? omni === "transformation" ? 4 : 2 : referenceItems.length);
         return { text, model: modelValue, config: normalizedConfig, references: imageReferences, firstFrame: frameReferencesEnabled ? firstFrameItem : null, lastFrame: frameReferencesEnabled ? lastFrameItem : null, videoReferences: acceptsVideoReferences ? [...videoReferenceItems].slice(0, 1) : kling ? [] : [...videoReferenceItems], audioReferences: kling ? [] : [...audioReferenceItems], taskCount: normalizeVideoCount(taskCountValue) };
@@ -829,35 +812,14 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
-        if ("aiccUri" in payload && payload.aiccUri) {
+        if (payload.kind !== "text" && payload.aiccUri) {
             if (!aiccSelectionEnabled) {
-                previousModelRef.current = model;
-                updateConfig("videoModel", "doubao-seedance-2.0");
-                if (payload.aiccChannelId) {
-                    updateConfig("videoChannelId", String(payload.aiccChannelId));
-                    updateConfig("activeChannelId", String(payload.aiccChannelId));
-                }
-                message.success(
-                    <span>
-                        已选用真人肖像素材，自动切换为移动云 Seedance 2.0 模型
-                        <button
-                            type="button"
-                            className="ml-2.5 font-bold underline cursor-pointer text-amber-500 hover:text-amber-400"
-                            onClick={() => {
-                                if (previousModelRef.current) {
-                                    updateConfig("videoModel", previousModelRef.current);
-                                    previousModelRef.current = null;
-                                }
-                            }}
-                        >
-                            撤销
-                        </button>
-                    </span>,
-                    5
-                );
-            } else if (payload.aiccChannelId) {
-                updateConfig("videoChannelId", String(payload.aiccChannelId));
-                updateConfig("activeChannelId", String(payload.aiccChannelId));
+                message.warning("请先选择支持移动云素材的 Seedance 模型，再选用素材");
+                return;
+            }
+            if (!Number.isSafeInteger(payload.aiccChannelId) || (payload.aiccChannelId ?? 0) <= 0) {
+                message.warning("素材来源信息缺失，请从移动云素材库重新选择");
+                return;
             }
         }
         const insertImage = async () => {
@@ -869,14 +831,14 @@ export default function VideoPage() {
                 message.warning("请选择图片素材");
                 return;
             }
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey, aiccUri: payload.aiccUri }].slice(0, referenceImageLimit));
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey, aiccUri: payload.aiccUri, aiccChannelId: payload.aiccChannelId }].slice(0, referenceImageLimit));
         };
         const insertFrame = (slot: "first" | "last") => {
             if (payload.kind !== "image") {
                 message.warning("请选择图片素材");
                 return;
             }
-            const next = { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey, aiccUri: payload.aiccUri };
+            const next = { id: nanoid(), name: payload.title, type: payload.mimeType || "image/*", dataUrl: payload.dataUrl, storageKey: payload.storageKey, aiccUri: payload.aiccUri, aiccChannelId: payload.aiccChannelId };
             slot === "first" ? setFirstFrame(next) : setLastFrame(next);
         };
         const insertVideo = () => {
@@ -888,7 +850,7 @@ export default function VideoPage() {
                 message.warning("请选择视频素材");
                 return;
             }
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, aiccUri: payload.aiccUri, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, videoReferenceLimit));
+            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: payload.mimeType || "video/mp4", url: payload.url, storageKey: payload.storageKey, aiccUri: payload.aiccUri, aiccChannelId: payload.aiccChannelId, width: payload.width, height: payload.height, bytes: payload.bytes }].slice(0, videoReferenceLimit));
         };
         const insertAudio = () => {
             if (isKlingWorkbench) {
@@ -899,7 +861,7 @@ export default function VideoPage() {
                 message.warning("请选择音频素材");
                 return;
             }
-            const next = filterAudioReferencesByDuration(audioReferences, [{ id: nanoid(), name: payload.title, type: payload.mimeType || "audio/mpeg", url: payload.url, storageKey: payload.storageKey, aiccUri: payload.aiccUri, durationMs: payload.durationMs }], message.warning);
+            const next = filterAudioReferencesByDuration(audioReferences, [{ id: nanoid(), name: payload.title, type: payload.mimeType || "audio/mpeg", url: payload.url, storageKey: payload.storageKey, aiccUri: payload.aiccUri, aiccChannelId: payload.aiccChannelId, durationMs: payload.durationMs }], message.warning);
             setAudioReferences((value) => [...value, ...next].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
         };
 

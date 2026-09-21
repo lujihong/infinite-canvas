@@ -43,7 +43,8 @@ function page<T>(value: unknown): AiccPage<T> {
 }
 export async function aiccChannels(signal?: AbortSignal): Promise<AiccChannel[]> {
     const value = await request("channels", "GET", undefined, undefined, signal);
-    return Array.isArray(value) ? value : [];
+    if (!Array.isArray(value) || !value.every(item => item && Number.isSafeInteger(item.id) && item.id > 0 && typeof item.name === "string" && Array.isArray(item.models) && item.models.every((model: unknown) => typeof model === "string"))) throw new Error("素材渠道响应格式异常，请刷新重试");
+    return value;
 }
 
 export async function aiccGroups(type: string, pageNo: number, channelIdOrSignal?: number | AbortSignal, maybeSignal?: AbortSignal) {
@@ -78,21 +79,26 @@ export async function aiccCheck(token: string, signal?: AbortSignal): Promise<bo
 }
 
 export async function aiccCreateGroup(groupName: string, channelId?: number, signal?: AbortSignal) {
-    return request("asset-groups", "POST", { groupName, channelId }, undefined, signal);
+    return request("asset-groups", "POST", { groupName }, aiccChannelParams(channelId), signal);
 }
 
-export async function aiccCreateAsset(groupId: string, assetName: string, assetUrl: string, assetType: string, signal?: AbortSignal) {
-    return request("assets", "POST", { groupId, assetName, assetUrl, assetType }, undefined, signal);
+function aiccChannelParams(channelId?: number) {
+    if (!Number.isSafeInteger(channelId) || (channelId ?? 0) <= 0) throw new Error("请先选择有效的移动云素材渠道");
+    return { channel_id: channelId };
 }
 
-export async function aiccUpload(file: File, groupId: string, assetType: AiccAsset["assetType"], signal?: AbortSignal): Promise<AiccUpload> {
+export async function aiccCreateAsset(groupId: string, assetName: string, assetUrl: string, assetType: string, signal?: AbortSignal, channelId?: number) {
+    return request("assets", "POST", { groupId, assetName, assetUrl, assetType }, aiccChannelParams(channelId), signal);
+}
+
+export async function aiccUpload(file: File, groupId: string, assetType: AiccAsset["assetType"], signal?: AbortSignal, channelId?: number): Promise<AiccUpload> {
     validateAiccFile(file, assetType);
     const data = new FormData();
     data.append("file", file);
     data.append("groupId", groupId);
     data.append("assetType", assetType);
     // Leave Content-Type/boundary to the browser; use the current workbench bearer.
-    const value = await request("uploads", "POST", data, undefined, signal);
+    const value = await request("uploads", "POST", data, aiccChannelParams(channelId), signal);
     if (!value?.id || !/^https:\/\//.test(value?.url || "") || value.assetType !== assetType || !(aiccUploadExpiry(value.expiresAt) > Date.now())) throw new Error("上传响应无效或已过期，请重新上传");
     return value;
 }

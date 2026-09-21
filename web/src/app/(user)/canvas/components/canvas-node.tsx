@@ -347,10 +347,10 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {data.metadata?.aiccUri ? (
                     <span
                         className="inline-flex items-center gap-1 shrink-0 rounded-full bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 text-[10px] font-medium text-cyan-600 dark:text-cyan-400"
-                        title={`移动云已认证真人素材 (${data.metadata.aiccUri})`}
+                        title={`移动云素材 (${data.metadata.aiccUri})`}
                     >
                         <ShieldCheck className="size-3" />
-                        移动云已认证
+                        移动云素材
                     </span>
                 ) : null}
             </div> : null}
@@ -542,24 +542,20 @@ function ErrorContent({ node, theme, onRetry, onReplaceAicc }: Pick<NodeContentR
 
     return (
         <div className="flex max-w-[280px] flex-col items-center gap-3 px-4 text-center">
+            <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5" style={{ color: theme.node.text }}>
+                {errorDetails || "生成失败"}
+            </div>
             {isPrivacyRealPerson ? (
-                <div className="flex flex-col items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 text-[10px] font-bold text-amber-500">
-                        🛡️ 移动云真人合规拦截
-                    </span>
-                    <p className="text-xs leading-relaxed text-stone-200">
-                        参考素材包含未经授权的真人肖像。<br />
-                        <span className="text-[11px] text-stone-400">Seedance 2.0 合规要求必须使用在「人物素材库」中已认证的真人素材。</span>
-                    </p>
-                </div>
-            ) : (
-                <div className="text-xs leading-5 text-red-300 break-words">{errorDetails || "生成失败"}</div>
-            )}
+                <p className="text-[11px] leading-relaxed" style={{ color: theme.node.muted }}>
+                    请按上述原始错误检查参考素材。可打开参考输入，选用符合要求的移动云素材；确认后再手动生成。
+                </p>
+            ) : null}
             <div className="flex flex-wrap items-center justify-center gap-2">
                 {isPrivacyRealPerson && onReplaceAicc ? (
                     <button
                         type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full bg-amber-500 hover:bg-amber-600 px-3 text-xs font-semibold text-stone-950 shadow-md transition hover:scale-[1.02] cursor-pointer"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02] cursor-pointer"
+                        style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                         onClick={(event) => {
                             event.stopPropagation();
                             onReplaceAicc(node);
@@ -567,7 +563,7 @@ function ErrorContent({ node, theme, onRetry, onReplaceAicc }: Pick<NodeContentR
                         onMouseDown={(event) => event.stopPropagation()}
                     >
                         <FolderPlus className="size-3.5" />
-                        选择已认证真人素材
+                        修复参考输入
                     </button>
                 ) : null}
                 <button
