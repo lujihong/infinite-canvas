@@ -103,6 +103,8 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+上面的命令仅适合本地试用。生产部署请使用 `docker-compose.release.yml`，显式传入不可变镜像引用、独立 Compose project、独立数据目录和经隔离校准的 CPU/内存/PID 限制，禁止依赖 `latest` 或直接复用旧回滚容器。详细步骤见 [Docker 部署](docs/overview/docker.md)。
+
 本地非 Docker 开发运行：
 ```bash
 cp .env.example .env

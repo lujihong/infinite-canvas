@@ -1,5 +1,5 @@
 # 构建 Next.js 前端产物。
-FROM oven/bun:1.3.14 AS web-build
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS web-build
 
 WORKDIR /app/web
 COPY web/package.json web/bun.lock ./
@@ -10,7 +10,7 @@ COPY web ./
 RUN NODE_OPTIONS=--max-old-space-size=1000 bun run build
 
 # 构建 Go 后端入口。
-FROM golang:1.25-alpine AS api-build
+FROM golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS api-build
 ENV GOPROXY=https://goproxy.cn,direct GOMAXPROCS=1 GOFLAGS=-p=1
 
 WORKDIR /app
@@ -26,7 +26,7 @@ COPY main.go ./
 RUN go build -o /server .
 
 # 运行镜像：Next.js 对外监听 3000，Go 只在容器内部监听 8080。
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9
 
 WORKDIR /app
 COPY VERSION /app/VERSION

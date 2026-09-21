@@ -1,0 +1,28 @@
+services:
+  app:
+    image: "${WORKBENCH_IMAGE:?Set WORKBENCH_IMAGE to an immutable tag or digest}"
+    env_file:
+      - "${WORKBENCH_ENV_FILE:-.env}"
+    volumes:
+      - "${WORKBENCH_DATA_DIR:?Set WORKBENCH_DATA_DIR to an explicit data directory}:/app/data"
+    ports:
+      - "${WORKBENCH_PORT:-3000}:3000"
+    restart: "${WORKBENCH_RESTART_POLICY:-unless-stopped}"
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          require('http').get('http://127.0.0.1:3000/api/health', response => {
+          process.exit(response.statusCode === 200 ? 0 : 1)
+          }).on('error', () => process.exit(1))
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: "${WORKBENCH_HEALTH_START_PERIOD:-45s}"
+    # /api/health is a liveness check; run restore/login/data smoke before cutover.
+    cpus: "${WORKBENCH_CPUS:?Set WORKBENCH_CPUS after isolated calibration}"
+    mem_limit: "${WORKBENCH_MEM_LIMIT:?Set WORKBENCH_MEM_LIMIT after isolated calibration}"
+    pids_limit: "${WORKBENCH_PIDS_LIMIT:?Set WORKBENCH_PIDS_LIMIT after isolated calibration}"

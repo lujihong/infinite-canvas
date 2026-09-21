@@ -193,6 +193,7 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
         return { model, ...buildGeminiTtsRequest(config, prompt) };
     }
     if (isGlmTtsModel(model)) {
+        if (referenceAudio) throw unsupportedReferenceAudioError();
         if (prompt.length > 1024) throw new Error("GLM-TTS 文本不能超过 1024 个字符");
         return {
             model,
@@ -203,6 +204,7 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
         };
     }
     if (isMimoTtsModel(model)) {
+        if (referenceAudio && !isMimoVoiceCloneModel(model)) throw unsupportedReferenceAudioError();
         const instructions = config.audioInstructions.trim();
         return {
             model,
@@ -215,6 +217,7 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
         };
     }
     if (isGrok2APITtsConfig(config, model)) {
+        if (referenceAudio) throw unsupportedReferenceAudioError();
         return {
             model,
             input: prompt,
@@ -226,6 +229,7 @@ async function buildAudioSpeechRequest(config: AiConfig, model: string, prompt: 
     }
 
     const instructions = config.audioInstructions.trim();
+    if (referenceAudio) throw unsupportedReferenceAudioError();
     return {
         model,
         input: prompt,
@@ -295,6 +299,10 @@ async function referenceAudioDataUrl(referenceAudio?: ReferenceAudio) {
     const base64 = await blobToBase64(blob);
     if (base64.length > 10 * 1024 * 1024) throw new Error("参考音频 Base64 编码后不能超过 10MB");
     return `data:${mimeType};base64,${base64}`;
+}
+
+function unsupportedReferenceAudioError() {
+    return new Error("当前音频模型不支持参考音频；请切换到 MiMo VoiceClone，或移除参考音频");
 }
 
 function normalizeCloneMimeType(value: string) {

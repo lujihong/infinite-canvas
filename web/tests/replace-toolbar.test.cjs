@@ -21,6 +21,8 @@ test('real Popover trigger opens sources without file click; only local choice o
  }
  dom.window.matchMedia=()=>({matches:false,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){}});
  const source=fs.readFileSync(path.join(__dirname,'../src/app/(user)/canvas/components/canvas-node-hover-toolbar.tsx'),'utf8');
+ assert.match(source, /isAudio[^\n]*buildReplaceMenu\("audio"\)/, 'audio nodes must expose the media source menu');
+ assert.match(source, /media === "audio" \? "音频"/, 'audio source menu must use audio wording');
  const ast=ts.createSourceFile('toolbar.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
  const fn=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='ToolbarAction');
  assert.ok(fn);

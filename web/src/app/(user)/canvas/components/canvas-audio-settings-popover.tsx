@@ -101,6 +101,15 @@ function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, o
             <div className="space-y-4">
                 <div className="text-lg font-semibold">音频设置</div>
                 {isMimoVoiceCloneModel(model) ? (
+                    <div className="rounded-xl border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
+                        仅 MiMo VoiceClone 会使用参考音频复刻声音；普通音频模型只使用预设音色或音色描述。
+                    </div>
+                ) : isGeminiTtsModel(model) || isGlmTtsModel(model) || isGrok2APITtsConfig(config, model) ? (
+                    <div className="rounded-xl border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
+                        当前模型不接收参考音频。要使用真人声音样本，请切换到支持 VoiceClone 的模型，并连接音频参考节点。
+                    </div>
+                ) : null}
+                {isMimoVoiceCloneModel(model) ? (
                     <ResourceSinglePicker
                         label="参考音频"
                         value={cloneAudioNodeId}

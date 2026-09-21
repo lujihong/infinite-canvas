@@ -156,35 +156,38 @@ export function CanvasNodeHoverToolbar({
         setImageToolSettingsOpen(true);
     }
 
-    const buildReplaceMenu = (isVid: boolean) => (
-        <div className="flex flex-col gap-1 p-1 min-w-[200px] text-xs bg-[#242424] text-stone-200 rounded-lg shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="px-2.5 py-1 text-[11px] font-medium text-stone-400 border-b border-white/10">选择替换媒体来源</div>
-            <button
-                type="button"
-                className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-cyan-400 font-medium"
-                onClick={() => onReplaceMedia ? onReplaceMedia(node, "aicc") : onUpload(node)}
-            >
-                <ShieldCheck className="size-4 shrink-0 text-cyan-400" />
-                <span>{isVid ? "从真人视频库选择 (AICC)" : "从真人素材库选择 (AICC)"}</span>
-            </button>
-            <button
-                type="button"
-                className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-stone-200"
-                onClick={() => onReplaceMedia ? onReplaceMedia(node, "my-assets") : onUpload(node)}
-            >
-                <FolderPlus className="size-4 shrink-0 text-amber-400" />
-                <span>从我的素材库选择</span>
-            </button>
-            <button
-                type="button"
-                className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-stone-300"
-                onClick={() => onReplaceMedia ? onReplaceMedia(node, "local") : onUpload(node)}
-            >
-                <Upload className="size-4 shrink-0 text-stone-400" />
-                <span>从本地文件上传</span>
-            </button>
-        </div>
-    );
+    const buildReplaceMenu = (media: "image" | "video" | "audio") => {
+        const mediaLabel = media === "video" ? "视频" : media === "audio" ? "音频" : "图片";
+        return (
+            <div className="flex flex-col gap-1 p-1 min-w-[200px] text-xs bg-[#242424] text-stone-200 rounded-lg shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
+                <div className="px-2.5 py-1 text-[11px] font-medium text-stone-400 border-b border-white/10">选择替换媒体来源</div>
+                <button
+                    type="button"
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-cyan-400 font-medium"
+                    onClick={() => onReplaceMedia ? onReplaceMedia(node, "aicc") : onUpload(node)}
+                >
+                    <ShieldCheck className="size-4 shrink-0 text-cyan-400" />
+                    <span>从真人{mediaLabel}库选择 (AICC)</span>
+                </button>
+                <button
+                    type="button"
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-stone-200"
+                    onClick={() => onReplaceMedia ? onReplaceMedia(node, "my-assets") : onUpload(node)}
+                >
+                    <FolderPlus className="size-4 shrink-0 text-amber-400" />
+                    <span>从我的素材库选择</span>
+                </button>
+                <button
+                    type="button"
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/10 text-left transition cursor-pointer text-stone-300"
+                    onClick={() => onReplaceMedia ? onReplaceMedia(node, "local") : onUpload(node)}
+                >
+                    <Upload className="size-4 shrink-0 text-stone-400" />
+                    <span>从本地文件上传</span>
+                </button>
+            </div>
+        );
+    };
 
     const baseToolbarTools: ToolbarTool[] = [
         { id: "info", title: "查看节点信息", label: "信息", icon: <Info className="size-4" />, onClick: () => onInfo(node) },
@@ -216,10 +219,10 @@ export function CanvasNodeHoverToolbar({
         ...(isConfig ? [{ id: "config", title: "生成配置", label: "生成配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
         ...(isText ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
-        ...(isImage && !isPanorama && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node), menuContent: buildReplaceMenu(false) }] : []),
-        ...(isVideo ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node), menuContent: buildReplaceMenu(true) }] : []),
-        ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
-        ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick, menuContent: tool.id === "replace" ? buildReplaceMenu(false) : undefined })) : []),
+        ...(isImage && !isPanorama && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node), menuContent: buildReplaceMenu("image") }] : []),
+        ...(isVideo ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node), menuContent: buildReplaceMenu("video") }] : []),
+        ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node), menuContent: buildReplaceMenu("audio") }] : []),
+        ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick, menuContent: tool.id === "replace" ? buildReplaceMenu("image") : undefined })) : []),
     ];
     const toolbarTools = hasImage ? [...baseToolbarTools, ...nodeToolbarTools].filter((tool) => tool.id === "uploadImageToCloud" || quickImageToolIdSet.has(tool.id as ImageQuickToolId)) : [...baseToolbarTools, ...nodeToolbarTools];
     const selectableImageToolbarTools = [...baseToolbarTools, ...nodeToolbarTools].filter((tool) => tool.id !== "retry" && tool.id !== "uploadImageToCloud") as ImageToolbarSettingsTool[];
