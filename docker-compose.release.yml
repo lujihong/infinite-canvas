@@ -1,6 +1,7 @@
 services:
   app:
-    image: "${WORKBENCH_IMAGE:?Set WORKBENCH_IMAGE to an immutable tag or digest}"
+    image: "${WORKBENCH_IMAGE:?Use scripts/release-workbench.sh with a verified local image}"
+    pull_policy: never
     env_file:
       - "${WORKBENCH_ENV_FILE:-.env}"
     volumes:

@@ -49,6 +49,10 @@ test('real Popover trigger opens sources without file click; only local choice o
   await React.act(async()=>root.render(React.createElement(Action,{key:'new-video-node',title:'替换视频',label:'替换视频',showLabel:true,onClick:upload,menuContent:menu})));
   assert.equal(document.querySelectorAll('.ant-popover:not(.ant-popover-hidden)').length,0);
   await click('替换视频');assert.equal(files,1);await click('本地文件');assert.equal(files,2);
+  await React.act(async()=>root.render(React.createElement(Action,{key:'audio-node',title:'上传音频',label:'上传音频',showLabel:true,onClick:upload,menuContent:menu})));
+  await click('上传音频');assert.equal(files,2);await click('移动云素材');assert.equal(aicc,2);assert.equal(files,2);
+  await click('上传音频');await click('我的素材');assert.equal(mine,2);assert.equal(files,2);
+  await click('上传音频');await click('本地文件');assert.equal(files,3);
  }finally{
   await React.act(async()=>root.unmount());dom.window.close();
   for(const [key,descriptor] of saved){if(descriptor)Object.defineProperty(global,key,descriptor);else delete global[key];}

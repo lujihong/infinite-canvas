@@ -20,7 +20,10 @@ export WORKBENCH_ENV_FILE='/srv/infinite-canvas/.env'
 export WORKBENCH_CPUS='<维护窗口前在隔离副本校准>'
 export WORKBENCH_MEM_LIMIT='<维护窗口前在隔离副本校准>'
 export WORKBENCH_PIDS_LIMIT='<维护窗口前在隔离副本校准>'
-docker compose -p infinite-canvas-release -f docker-compose.release.yml up -d
+export WORKBENCH_PROJECT='infinite-canvas-release'
+# 先预拉取并核验镜像；脚本将它解析为本地 sha256 ID，部署期间禁止拉取。
+bash scripts/release-workbench.sh check
+bash scripts/release-workbench.sh up
 ```
 
 发布前应确认 `docker compose config` 展开的镜像不是 `latest`。Compose healthcheck 只验证 `3000 -> Next -> Go API` 的存活代理链路，不代表 SQLite、迁移或素材存储已经 ready；切流前仍必须完成独立数据恢复、登录、数据数量和素材读取冒烟。回滚时先停止新实例，再恢复旧的不可变镜像；旧实例重新接入业务网络前必须确认线上只有一个 `infinite-canvas` upstream。
@@ -61,13 +64,13 @@ DATABASE_DSN=/app/data/infinite-canvas.db
 
 ## 数据备份与恢复演练
 
-`data/` 同时保存 SQLite、提示词和上传素材。不要对正在写入的 SQLite 文件直接普通复制。维护窗口或停写后执行一致性备份：
+以下脚本仅用于 SQLite 部署，依赖 Python 3 标准库。使用 PostgreSQL 的生产站点必须另做 `pg_dump` 与隔离 `pg_restore`，不能用这些脚本替代数据库备份。`data/` 同时保存 SQLite、提示词和上传素材；数据库使用在线 backup，媒体目录需要停写以保持跨文件一致性。预留至少一份数据副本和压缩归档的磁盘空间，维护窗口或停写后执行：
 
 ```bash
 scripts/backup-data.sh /srv/infinite-canvas/data /srv/infinite-canvas/backups
 ```
 
-恢复必须进入新的空目录，脚本会拒绝覆盖已有内容并执行 SQLite `integrity_check`：
+恢复目标必须是尚不存在的新目录，父目录需要存在；脚本会拒绝覆盖已有目录并执行 SQLite `integrity_check`：
 
 ```bash
 scripts/restore-data.sh /srv/infinite-canvas/backups/infinite-canvas-data-<UTC>.tar.gz /srv/infinite-canvas/restore-smoke

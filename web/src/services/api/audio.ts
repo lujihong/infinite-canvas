@@ -265,6 +265,7 @@ function decodeGeminiAudio(payload: GeminiAudioResponse) {
 }
 
 async function buildMiMoNativeRequest(config: AiConfig, model: string, prompt: string, referenceAudio?: ReferenceAudio) {
+    if (referenceAudio && !isMimoVoiceCloneModel(model)) throw unsupportedReferenceAudioError();
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
     const instructions = config.audioInstructions.trim();
     if (isMimoVoiceDesignModel(model)) {
@@ -289,11 +290,20 @@ async function buildMiMoNativeRequest(config: AiConfig, model: string, prompt: s
 
 async function referenceAudioDataUrl(referenceAudio?: ReferenceAudio) {
     if (!referenceAudio) throw new Error("请连接并选择参考音频节点");
+    if (referenceAudio.aiccUri || referenceAudio.url.startsWith("asset://")) {
+        throw new Error("移动云素材仅用于所属渠道的视频参考；声音复刻请使用本人或已获授权的原始录音文件");
+    }
     const url = await resolveMediaUrl(referenceAudio.storageKey, referenceAudio.url);
     if (!url) throw new Error("参考音频不可用");
     const response = await fetch(url);
     if (!response.ok) throw new Error(`读取参考音频失败（${response.status}）`);
+    const declaredBytes = Number(response.headers.get("content-length"));
+    if (declaredBytes > 7.5 * 1024 * 1024) {
+        await response.body?.cancel();
+        throw new Error("声音样本不能超过 7.5 MiB，请先裁剪");
+    }
     const blob = await response.blob();
+    if (blob.size > 7.5 * 1024 * 1024) throw new Error("声音样本不能超过 7.5 MiB，请先裁剪");
     const mimeType = normalizeCloneMimeType(blob.type) || normalizeCloneMimeType(referenceAudio.type);
     if (!mimeType) throw new Error("参考音频仅支持 MP3 或 WAV");
     const base64 = await blobToBase64(blob);

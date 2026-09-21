@@ -5265,11 +5265,15 @@ function buildAudioGenerationMetadata(config: AiConfig, sourceMetadata?: CanvasN
 }
 
 function selectMiMoVoiceCloneReference(config: AiConfig, metadata: CanvasNodeMetadata | undefined, references: ReferenceAudio[]) {
-    if (!isMimoVoiceCloneModel(config.model || config.audioModel)) return undefined;
+    if (!isMimoVoiceCloneModel(config.model || config.audioModel)) {
+        if (references.length) throw new Error("当前音频模型不支持声音参考，请移除音频连接或选择支持声音复刻的模型");
+        return undefined;
+    }
     const selectedId = metadata?.mimoVoiceCloneAudioNodeId || "";
     if (selectedId) {
         const selected = references.find((item) => item.id === selectedId);
-        if (selected) return selected;
+        if (!selected) throw new Error("原参考音频已断开，请重新选择声音样本");
+        return selected;
     }
     if (references.length === 1) return references[0];
     if (!references.length) throw new Error("请连接参考音频节点");

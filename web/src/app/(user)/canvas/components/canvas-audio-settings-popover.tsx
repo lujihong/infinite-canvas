@@ -102,13 +102,13 @@ function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, o
                 <div className="text-lg font-semibold">音频设置</div>
                 {isMimoVoiceCloneModel(model) ? (
                     <div className="rounded-xl border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
-                        仅 MiMo VoiceClone 会使用参考音频复刻声音；普通音频模型只使用预设音色或音色描述。
+                        使用已连接的原始录音作为声音样本（MP3/WAV，最大 7.5 MiB）。移动云素材引用不能跨平台用于声音复刻。
                     </div>
-                ) : isGeminiTtsModel(model) || isGlmTtsModel(model) || isGrok2APITtsConfig(config, model) ? (
+                ) : (
                     <div className="rounded-xl border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
-                        当前模型不接收参考音频。要使用真人声音样本，请切换到支持 VoiceClone 的模型，并连接音频参考节点。
+                        {model ? "当前接入方式不支持录音参考。声音复刻需要选择已开通的 VoiceClone 模型，再连接原始录音。" : "请先选择音频模型。预设音色不等于真人声音复刻。"}
                     </div>
-                ) : null}
+                )}
                 {isMimoVoiceCloneModel(model) ? (
                     <ResourceSinglePicker
                         label="参考音频"
@@ -128,12 +128,13 @@ function AudioSettingsPortal({ buttonRect, panelRef, placement, theme, config, o
 }
 
 function validCloneAudioNodeId(value: string | undefined, options: CanvasVideoResourceOption[]) {
-    if (value && options.some((item) => item.nodeId === value)) return value;
+    if (value) return options.some((item) => item.nodeId === value) ? value : "";
     return options.length === 1 ? options[0].nodeId : "";
 }
 
 function audioSettingsSummary(config: AiConfig, cloneAudioNodeId: string, audioOptions: CanvasVideoResourceOption[]) {
     const model = config.model || config.audioModel || "";
+    if (!model) return "请选择音频模型";
     if (isGeminiTtsModel(model) && isGeminiConfig(config, model)) return normalizeGeminiTtsVoice(config.geminiTtsVoice);
     if (isGlmTtsModel(model)) return `${glmTtsVoiceLabel(config.glmTtsVoice)} · ${normalizeGlmTtsFormat(config.glmTtsFormat).toUpperCase()} · ${normalizeGlmTtsSpeed(config.glmTtsSpeed)}x`;
     if (isGrok2APITtsConfig(config, model)) return `${config.grokTtsVoice || "eve"} · ${normalizeGrokTtsLanguage(config.grokTtsLanguage)} · ${normalizeGrokTtsFormat(config.grokTtsFormat).toUpperCase()} · ${normalizeGrokTtsSpeed(config.grokTtsSpeed)}x`;
