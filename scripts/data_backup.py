@@ -28,7 +28,7 @@ def readonly_db(path):
     with path.open("rb") as handle:
         if handle.read(16) != b"SQLite format 3\x00":
             raise ValueError("invalid or empty SQLite database")
-    return sqlite3.connect(path.as_uri() + "?mode=ro", timeout=10)
+    return sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=10)
 
 
 def check_db(path):
