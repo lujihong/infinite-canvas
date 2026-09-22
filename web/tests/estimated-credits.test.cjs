@@ -110,7 +110,7 @@ test('EstimatedCredits renders hook status and explains missing usage without cu
   const source = fs.readFileSync(path.join(root, 'components/estimated-credits.tsx'), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   for (const label of ['预计消耗 12 积分', '预计积分计算中…', '按实际用量结算积分', '预计积分暂不可用']) {
-    const scope = { exports: {}, require: name => name === 'react/jsx-runtime' ? require(name) : name === 'antd' ? { Tooltip: ({ children }) => children } : { useRequestQuote: () => ({ quote: { missing_fields: ['输出时长'] }, label, detail: '按实际用量' }) } };
+    const scope = { exports: {}, require: name => name === 'react/jsx-runtime' ? require(name) : name === 'antd' ? { Tooltip: ({ children, title }) => React.createElement('div', null, title, children) } : { useRequestQuote: () => ({ quote: { missing_fields: ['输出时长'] }, label, detail: '按实际用量\n待确定：输出时长' }) } };
     vm.runInNewContext(code, scope);
     const html = renderToStaticMarkup(React.createElement(scope.exports.EstimatedCredits, { config: {}, descriptor: null }));
     assert.ok(html.includes(label)); assert.ok(html.includes('输出时长')); assert.ok(html.includes('whitespace-normal')); assert.ok(!html.includes('¥'));

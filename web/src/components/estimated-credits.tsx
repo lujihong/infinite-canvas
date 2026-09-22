@@ -11,11 +11,10 @@ export type EstimatedCreditsProps = {
 };
 
 export function EstimatedCredits({ config, descriptor, className = "" }: EstimatedCreditsProps) {
-    const { quote, label, detail } = useRequestQuote(config, descriptor);
-    const explanation = [detail, quote?.missing_fields?.length ? `待确定用量：${quote.missing_fields.join("、")}` : ""].filter(Boolean).join("；");
+    const { label, detail } = useRequestQuote(config, descriptor);
     return (
-        <Tooltip title={explanation}>
-            <span className={`inline-block min-w-0 max-w-full whitespace-normal break-words text-xs leading-5 tabular-nums ${className}`} aria-live="polite" title={explanation}>
+        <Tooltip title={<div className="whitespace-pre-line break-words text-xs leading-5">{detail}</div>} styles={{ root: { maxWidth: "min(360px, calc(100vw - 24px))" }, container: { maxHeight: "min(480px, 70vh)", overflowY: "auto", overflowWrap: "anywhere" } }}>
+            <span className={`inline-block min-w-0 max-w-full whitespace-normal break-words text-xs leading-5 tabular-nums ${className}`} aria-live="polite">
                 {label}
             </span>
         </Tooltip>

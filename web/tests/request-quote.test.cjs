@@ -35,6 +35,8 @@ test('quote label distinguishes zero, missing, invalid and tiny positive points'
  assert.equal(quoteLabel({status:'estimated',points_cost:null}),'预计积分暂不可用');
  assert.equal(quoteLabel({status:'estimated',points_cost:NaN}),'预计积分暂不可用');
  assert.match(quoteDetails({status:'usage_required',unit_rates:[{dimension:'输入',points_cost:0.002,per:1000,unit:'token'}]}),/0.002 积分/);
+ const details=quoteDetails({status:'usage_required',missing_fields:['usage.image_input_tokens'],unit_rates:[{dimension:'image_input_tokens',points_cost:0.00007999999999999999,per:1,unit:'token'},{dimension:'image_output_tokens',points_cost:0.00030000000000000003,per:1,unit:'token'}]});
+ assert.match(details,/0.00008 积分/);assert.match(details,/0.0003 积分/);assert.equal((details.match(/待确定/g)||[]).length,1);assert.doesNotMatch(details,/999999|00000000003/);
 });
 test('hook follows backend transport for historical IDs, aborts stale identities and never quotes browser-direct requests',async()=>{
  const dom=new JSDOM('<div id="root"></div>',{url:'https://example.test'});const saved=new Map();

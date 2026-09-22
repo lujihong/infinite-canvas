@@ -52,6 +52,11 @@ export function getAntThemeConfig(dark: boolean): ThemeConfig {
             colorTextLightSolid: color.primaryText,
         },
         components: {
+            Tooltip: {
+                // Primary buttons invert their text in dark mode; tooltip surfaces do not.
+                colorTextLightSolid: "#fafafa",
+                colorBgSpotlight: dark ? "#262626" : "#171717",
+            },
             Button: {
                 primaryShadow: "none",
             },

@@ -26,7 +26,7 @@ export function quoteLabel(quote?: RequestQuote): string {
 
 export function quoteDetails(quote?: RequestQuote): string {
     const rates = quote?.unit_rates?.filter(rate => typeof rate.points_cost === "number" && Number.isFinite(rate.points_cost) && rate.points_cost >= 0 && Number.isFinite(rate.per) && rate.per > 0)
-        .map(rate => `${rate.dimension}：${rate.points_cost} 积分 / ${rate.per} ${rate.unit}`) || [];
+        .map(rate => `${rate.dimension}：${Number(rate.points_cost!.toPrecision(12))} 积分 / ${rate.per} ${rate.unit}`) || [];
     return [quote?.message, ...rates, quote?.missing_fields?.length ? `待确定：${quote.missing_fields.join("、")}` : "", "预计积分依当前参数及本人价格计算；实际返回用量和重试路由可能影响最终结算。"].filter(Boolean).join("\n");
 }
 
