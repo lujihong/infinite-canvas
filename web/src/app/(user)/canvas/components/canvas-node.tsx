@@ -3,6 +3,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import dynamic from "next/dynamic";
+import { Modal } from "antd";
+import { useCopyText } from "@/hooks/use-copy-text";
+import { describeCanvasError } from "../utils/canvas-error";
 import { ChevronRight, FolderPlus, Image as ImageIcon, Maximize2, Music2, Pause, Play, RefreshCw, ShieldCheck, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -433,7 +436,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
 
-                {!isGroup && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
+                {!isGroup && data.metadata?.status !== "error" && !hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
                 {referenceSelectionState && (referenceSelectionState !== "available" || hovered) ? (
                     <div className="pointer-events-none absolute inset-0 z-[60] grid place-items-center rounded-[inherit]" style={{ background: `color-mix(in srgb, ${theme.canvas.background} ${referenceSelectionState === "target" ? 78 : referenceSelectionState === "disabled" ? 60 : 34}%, transparent)`, boxShadow: referenceSelectionState === "available" ? `inset 0 0 0 2px ${selectionBlue}` : undefined }}>
@@ -538,48 +541,35 @@ function LoadingContent({ node, theme, now }: Pick<NodeContentRendererProps, "no
 
 function ErrorContent({ node, theme, onRetry, onReplaceAicc }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry" | "onReplaceAicc">) {
     const errorDetails = node.metadata?.errorDetails || "";
-    const isPrivacyRealPerson = errorDetails.includes("PrivacyInformation") || errorDetails.includes("real person") || errorDetails.includes("InputImageSensitiveContentDetected");
+    const error = describeCanvasError(errorDetails);
+    const [detailsOpen, setDetailsOpen] = useState(false);
+    const copyText = useCopyText();
+    useEffect(() => setDetailsOpen(false), [node.id, errorDetails]);
+    const buttonStyle = { background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text };
+    const buttonClass = "inline-flex min-h-8 min-w-0 max-w-full items-center justify-center gap-1 rounded-lg border px-2 py-1 text-xs leading-4 whitespace-normal [overflow-wrap:anywhere] cursor-pointer hover:opacity-80";
 
     return (
-        <div className="flex max-w-[280px] flex-col items-center gap-3 px-4 text-center">
-            <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5" style={{ color: theme.node.text }}>
-                {errorDetails || "生成失败"}
+        <div data-canvas-error data-canvas-no-zoom className="flex h-full w-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden rounded-[inherit] p-3 text-left" style={{ color: theme.node.text }}
+            onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+            <div data-canvas-error-body className="thin-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain [overflow-wrap:anywhere]" onWheel={(event) => event.stopPropagation()}>
+                <p className="m-0 text-sm font-semibold leading-5">{error.title}</p>
+                <p className="mb-0 mt-1 whitespace-pre-wrap text-xs leading-5">{error.summary}</p>
+                {error.guidance ? <p className="mb-0 mt-1 text-[11px] leading-4" style={{ color: theme.node.muted }}>{error.guidance}</p> : null}
             </div>
-            {isPrivacyRealPerson ? (
-                <p className="text-[11px] leading-relaxed" style={{ color: theme.node.muted }}>
-                    请按上述原始错误检查参考素材。可打开参考输入，选用符合要求的移动云素材；确认后再手动生成。
-                </p>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-center gap-2">
-                {isPrivacyRealPerson && onReplaceAicc ? (
-                    <button
-                        type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02] cursor-pointer"
-                        style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            onReplaceAicc(node);
-                        }}
-                        onMouseDown={(event) => event.stopPropagation()}
-                    >
-                        <FolderPlus className="size-3.5" />
-                        修复参考输入
-                    </button>
-                ) : null}
-                <button
-                    type="button"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02] cursor-pointer"
-                    style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onRetry?.(node);
-                    }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                >
-                    <RefreshCw className="size-3.5" />
-                    重试
-                </button>
+            <div data-canvas-error-actions className="flex min-w-0 shrink-0 flex-wrap gap-1.5">
+                {error.canRepairReference && onReplaceAicc ? <button type="button" className={buttonClass} style={buttonStyle} onClick={() => onReplaceAicc(node)}><FolderPlus className="size-3 shrink-0" />检查参考</button> : null}
+                <button type="button" className={buttonClass} style={buttonStyle} onClick={() => setDetailsOpen(true)}>错误详情</button>
+                {onRetry ? <button type="button" className={buttonClass} style={buttonStyle} onClick={() => onRetry(node)}><RefreshCw className="size-3 shrink-0" />重试</button> : null}
             </div>
+            <Modal title="生成失败详情" open={detailsOpen} onCancel={() => setDetailsOpen(false)} width={720} centered destroyOnHidden
+                styles={{ container: { background: theme.toolbar.panel, color: theme.node.text }, header: { background: theme.toolbar.panel, color: theme.node.text } }}
+                footer={<div className="flex flex-wrap justify-end gap-2"><button type="button" className={buttonClass} style={buttonStyle} onClick={() => copyText(errorDetails || error.message, "已复制完整错误")}>复制完整错误</button><button type="button" className={buttonClass} style={buttonStyle} onClick={() => setDetailsOpen(false)}>关闭</button></div>}>
+                <div className="thin-scrollbar max-h-[60dvh] min-w-0 overflow-y-auto overscroll-contain" onWheel={(event) => event.stopPropagation()}>
+                    <p className="text-sm font-medium">{error.title}</p>
+                    {error.guidance ? <p className="text-xs leading-5">{error.guidance}</p> : null}
+                    <pre className="m-0 w-full whitespace-pre-wrap rounded-lg p-3 text-xs leading-5 select-text [overflow-wrap:anywhere]" style={{ background: theme.node.fill, color: theme.node.text }}>{errorDetails || error.message}</pre>
+                </div>
+            </Modal>
         </div>
     );
 }
@@ -634,7 +624,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             props.node.metadata?.status === "loading" ? (
                 <LoadingContent node={props.node} theme={props.theme} now={props.now} />
             ) : props.node.metadata?.status === "error" ? (
-                <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
+                <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onReplaceAicc={props.onReplaceAicc} />
             ) : (
                 <EmptyImageContent {...props} isBatchRoot={false} />
             );
