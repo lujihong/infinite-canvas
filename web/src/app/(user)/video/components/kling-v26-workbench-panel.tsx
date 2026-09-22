@@ -3,6 +3,7 @@ import { App, Button, Input, Switch, Tag } from "antd";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
+import { EstimatedCredits, type EstimatedCreditsProps } from "@/components/estimated-credits";
 import { boolConfig } from "@/lib/seedance-video";
 import type { AiConfig, VideoElementItem, VideoElementReference, VideoMultiPromptItem } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -64,6 +65,7 @@ const TEXT = {
 };
 
 export function KlingV26WorkbenchPanel({
+    generationQuote,
     isKlingV3,
     klingProvider = "apimart",
     klingOmniVariant = "",
@@ -100,6 +102,7 @@ export function KlingV26WorkbenchPanel({
     onMoveElementReference,
     onGenerate,
 }: {
+    generationQuote: EstimatedCreditsProps;
     isKlingV3: boolean;
     klingProvider?: "apimart" | "kie";
     klingOmniVariant?: string;
@@ -356,8 +359,11 @@ export function KlingV26WorkbenchPanel({
                 </KlingSection>
             </div>
             <div className="shrink-0 border-t border-stone-200 p-4 dark:border-stone-800">
-                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate} onClick={onGenerate}>
-                    {pendingCount ? TEXT.runningPrefix + pendingCount + TEXT.runningSuffix : TEXT.start}
+                <Button type="primary" size="large" block className="!h-auto !min-h-11 !whitespace-normal !py-2" icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate} onClick={onGenerate}>
+                    <span className="flex min-w-0 flex-wrap items-center justify-center gap-2">
+                        <span>{pendingCount ? TEXT.runningPrefix + pendingCount + TEXT.runningSuffix : TEXT.start}</span>
+                        <EstimatedCredits {...generationQuote} />
+                    </span>
                 </Button>
             </div>
         </div>

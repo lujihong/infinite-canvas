@@ -31,9 +31,10 @@ import { applyCameraPrompt } from "../utils/canvas-camera";
 import { GROUP_PADDING, findContainingGroupId, findGroupDropTarget, getNodeBounds, snapNodesIntoGroup } from "../utils/canvas-group";
 import { App, Button, Dropdown, Modal } from "antd";
 import { isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
-import { isMimoVoiceCloneModel } from "@/lib/mimo-tts";
-import { isGlmTtsModel } from "@/lib/audio-generation";
-import { isGrok2APITtsConfig } from "@/lib/grok-tts";
+import { isMimoVoiceCloneModel, isMimoTtsModel, isMimoPresetTtsModel, isMimoVoiceDesignModel, normalizeMimoTtsFormat, normalizeMimoTtsVoice } from "@/lib/mimo-tts";
+import { isGlmTtsModel, normalizeAudioVoiceValue, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeGlmTtsVoice, normalizeGlmTtsFormat, normalizeGlmTtsSpeed } from "@/lib/audio-generation";
+import { isGrok2APITtsConfig, normalizeGrokTtsLanguage, normalizeGrokTtsFormat, normalizeGrokTtsSpeed } from "@/lib/grok-tts";
+import { normalizeGeminiTtsVoice } from "@/lib/gemini-tts";
 import { isGeminiConfig, isGeminiTtsModel } from "@/lib/gemini";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
@@ -41,6 +42,8 @@ import { sortStoryboardVideoNodes } from "../utils/canvas-storyboard-sort";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasConfigNodePanel } from "../components/canvas-config-node-panel";
+import { buildQuoteDescriptor } from "@/services/api/quote-descriptor";
+import type { EstimatedCreditsProps } from "@/components/estimated-credits";
 import { CanvasDirector } from "../components/canvas-director";
 import { CanvasDirectorNodePanel } from "../components/canvas-director-node-panel";
 import { CanvasAssistantPanel } from "../components/canvas-assistant-panel";
@@ -967,6 +970,20 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         });
         return map;
     }, [connections, nodes]);
+    // Compute real generation inputs once in the parent; panels never reconstruct references from UI previews.
+    const generationQuotesByNodeId = useMemo(() => {
+        const map = new Map<string, EstimatedCreditsProps>();
+        nodes.forEach((node) => {
+            if (node.type !== CanvasNodeType.Config && node.id !== dialogNodeId) return;
+            if (node.type === CanvasNodeType.Director) return;
+            const mode = node.type === CanvasNodeType.Config ? node.metadata?.generationMode || "image" : node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image";
+            const prompt = node.type === CanvasNodeType.Config ? node.metadata?.composerContent ?? node.metadata?.prompt ?? "" : isPanoramaNodeType(node.type) ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
+            const sourceText = node.type === CanvasNodeType.Text ? node.metadata?.content?.trim() || "" : "";
+            const context = buildNodeGenerationContext(node.id, nodes, connections, mode === "text" && sourceText ? `请根据要求修改以下文本。\n\n原文：\n${sourceText}\n\n修改要求：\n${prompt}` : prompt);
+            map.set(node.id, buildCanvasGenerationQuote(buildGenerationConfig(effectiveConfig, node, mode), node, mode, context));
+        });
+        return map;
+    }, [connections, nodes, dialogNodeId, effectiveConfig]);
     const directorPanoramasByNodeId = useMemo(() => {
         const map = new Map<string, CanvasDirectorPanorama[]>();
         nodes.forEach((node) => {
@@ -4340,6 +4357,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                 ) : panelNode.type === CanvasNodeType.Director ? null : (
                                     <CanvasNodePromptPanel
                                         node={panelNode}
+                                        generationQuote={generationQuotesByNodeId.get(panelNode.id)}
                                         isRunning={runningNodeId === panelNode.id}
                                         mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || []}
                                         connectedNodes={connectedNodesByNodeId.get(panelNode.id) || []}
@@ -4365,6 +4383,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                 ) : (
                                     <CanvasConfigNodePanel
                                         node={contentNode}
+                                        generationQuote={generationQuotesByNodeId.get(contentNode.id)}
                                         isRunning={runningNodeId === contentNode.id}
                                         inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
                                         videoFrameOptions={videoFrameOptionsByNodeId.get(contentNode.id) || []}
@@ -5282,6 +5301,57 @@ function selectMiMoVoiceCloneReference(config: AiConfig, metadata: CanvasNodeMet
 
 function referenceUrl(image: ReferenceImage) {
     return image.storageKey || image.url || (!image.dataUrl.startsWith("data:") ? image.dataUrl : undefined);
+}
+
+function buildCanvasGenerationQuote(config: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode, context: NodeGenerationContext): EstimatedCreditsProps {
+    let prompt = context.prompt.trim();
+    if (mode === "video") {
+        config = withCanvasVideoAdvancedConfig(config, context);
+        const frames = supportsVideoFrameReferences(config.model, channelProtocolForConfig(config));
+        const references = frames ? context.referenceImages : [...context.referenceImages, ...[context.firstFrame, context.lastFrame].filter((image): image is ReferenceImage => Boolean(image))];
+        return { config, descriptor: buildQuoteDescriptor({ config, mode, prompt: applyCameraPrompt(prompt, node.metadata?.cameraControl), references: { references, firstFrame: frames ? context.firstFrame : null, lastFrame: frames ? context.lastFrame : null, videoReferences: context.referenceVideos, audioReferences: context.referenceAudios }, batchCount: 1, batchMode: "separate" }) };
+    }
+    if (mode === "image") {
+        const panorama = isPanoramaNodeType(node.type);
+        const references = [...context.referenceImages, ...sourceNodeReferenceImages(node)];
+        const batchCount = !panorama && isKIESeedreamLayerDecompositionModel(config.model) ? 1 : getGenerationCount(config.count);
+        if (panorama) {
+            config = { ...config, size: PANORAMA_IMAGE_SIZE, quality: config.quality === "auto" ? "medium" : config.quality };
+            prompt = buildPanoramaPrompt(prompt, references.length > 0);
+        } else prompt = applyCameraPrompt(prompt, node.metadata?.cameraControl);
+        return { config, descriptor: buildQuoteDescriptor({ config: { ...config, count: "1" }, mode, prompt, references: { references }, batchCount, batchMode: "separate" }) };
+    }
+    // Token/output usage remains unknown. The quote API reports usage_required, never a fabricated total.
+    if (mode === "text") return { config, descriptor: { endpoint: "/v1/chat/completions", body: { model: config.model, messages: buildNodeChatMessages(context) }, batch_count: 1 } };
+    const body: Record<string, unknown> = { model: config.model, input: prompt };
+    const missing: string[] = [];
+    if (isMimoTtsModel(config.model)) {
+        body.response_format = normalizeMimoTtsFormat(config.mimoTtsFormat);
+        if (isMimoPresetTtsModel(config.model)) body.voice = normalizeMimoTtsVoice(config.mimoTtsVoice);
+        if (isMimoVoiceDesignModel(config.model)) {
+            body.mimo_voice_design_prompt = config.mimoVoiceDesignPrompt.trim();
+            if (!body.mimo_voice_design_prompt) missing.push("声音设计描述");
+        }
+        if (isMimoVoiceCloneModel(config.model)) {
+            const selectedId = node.metadata?.mimoVoiceCloneAudioNodeId;
+            const ref = selectedId ? context.referenceAudios.find(item => item.id === selectedId) : context.referenceAudios.length === 1 ? context.referenceAudios[0] : undefined;
+            // The real sender must hydrate clone audio. A metadata-only quote cannot invent its base64 payload.
+            missing.push(ref ? "声音复刻参考音频用量" : "声音复刻参考音频");
+        }
+        if ((isMimoPresetTtsModel(config.model) || isMimoVoiceCloneModel(config.model)) && config.audioInstructions.trim()) body.instructions = config.audioInstructions.trim();
+    } else if (isGeminiTtsModel(config.model) && isGeminiConfig(config, config.model)) {
+        delete body.input;
+        body.contents = [{ role: "user", parts: [{ text: prompt }] }];
+        body.generationConfig = { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: normalizeGeminiTtsVoice(config.geminiTtsVoice) } } } };
+    } else if (isGlmTtsModel(config.model)) {
+        Object.assign(body, { voice: normalizeGlmTtsVoice(config.glmTtsVoice), response_format: normalizeGlmTtsFormat(config.glmTtsFormat), speed: Number(normalizeGlmTtsSpeed(config.glmTtsSpeed)) });
+    } else if (isGrok2APITtsConfig(config, config.model)) {
+        Object.assign(body, { voice_id: config.grokTtsVoice || "eve", language: normalizeGrokTtsLanguage(config.grokTtsLanguage), output_format: { codec: normalizeGrokTtsFormat(config.grokTtsFormat) }, speed: Number(normalizeGrokTtsSpeed(config.grokTtsSpeed)) });
+    } else {
+        Object.assign(body, { voice: normalizeAudioVoiceValue(config.audioVoice), response_format: normalizeAudioFormatValue(config.audioFormat), speed: Number(normalizeAudioSpeedValue(config.audioSpeed)), ...(config.audioInstructions.trim() ? { instructions: config.audioInstructions.trim() } : {}) });
+    }
+    if (!isMimoVoiceCloneModel(config.model) && context.referenceAudios.length) missing.push("当前音频模型不支持参考音频");
+    return { config, descriptor: { endpoint: "/v1/audio/speech", body, batch_count: 1, ...(missing.length ? { missing_fields: missing } : {}) } };
 }
 
 function withCanvasVideoAdvancedConfig(config: AiConfig, context: Pick<NodeGenerationContext, "videoMultiPrompt" | "videoElementList">): AiConfig {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -535,52 +536,59 @@ func getNewAPISystemStatus() (float64, int64) {
 }
 
 func FetchUserWalletBalance(userID string) (map[string]any, error) {
-	token := GetUserExclusiveNewAPIToken(userID)
-	var quota int64 = 0
-
-	if token != "" {
-		client := &http.Client{Timeout: 5 * time.Second}
-		req, err := http.NewRequest(http.MethodGet, getNewAPIBaseURL()+"/api/user/quota-by-token", nil)
-		if err == nil {
-			req.Header.Set("Authorization", "Bearer "+token)
-			req.Header.Set("Host", "api.xybcloud.com")
-			resp, doErr := client.Do(req)
-			if doErr == nil {
-				defer resp.Body.Close()
-				var res struct {
-					Success bool `json:"success"`
-					Data    struct {
-						Quota int64 `json:"quota"`
-					} `json:"data"`
-				}
-				if json.NewDecoder(resp.Body).Decode(&res) == nil && res.Success {
-					quota = res.Data.Quota
-				}
-			}
+	user, ok, err := repository.GetUserByID(userID)
+	if err != nil || !ok {
+		return nil, errors.New("无法读取钱包用户")
+	}
+	// Do not reinterpret malformed binding data as a local-only wallet.
+	var extra UserExtraInfo
+	if user.Extra != "" && json.Unmarshal([]byte(user.Extra), &extra) != nil {
+		return nil, errors.New("钱包绑定数据无效")
+	}
+	token := strings.TrimSpace(GetUserExclusiveNewAPIToken(userID))
+	if token == "" {
+		// Local Credits are documented as compute points, not upstream quota.
+		if user.Credits < 0 || int64(user.Credits) > 1<<53-1 {
+			return nil, errors.New("本地算力点余额无效")
 		}
+		points := float64(user.Credits)
+		return map[string]any{
+			"quota": nil, "balanceYuan": nil, "points": points,
+			"formattedPoints": formatBillingPoints(points), "formattedBalance": "本地算力点",
+			"exchangeRate": nil, "minTopup": 1, "source": "local", "unit": "points",
+		}, nil
 	}
+	return fetchNewAPIWalletBalance(getNewAPIBaseURL(), token)
+}
 
-	if quota <= 0 {
-		user, ok, _ := repository.GetUserByID(userID)
-		if ok {
-			quota = int64(user.Credits)
-		}
+func fetchNewAPIWalletBalance(base, token string) (map[string]any, error) {
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	var res struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Quota *int64 `json:"quota"`
+		} `json:"data"`
 	}
-
-	_, quotaPerUnit := getNewAPISystemStatus()
-	if quotaPerUnit <= 0 {
-		quotaPerUnit = 500000
+	if err := personalPricingJSON(context.Background(), client, base, "/api/user/quota-by-token", token, &res); err != nil {
+		return nil, errors.New("上游钱包读取失败，请稍后重试")
 	}
-	balanceYuan, points := quotaBillingValues(quota, quotaPerUnit)
-
+	if !res.Success || res.Data.Quota == nil || *res.Data.Quota < 0 || *res.Data.Quota > 1<<53-1 {
+		return nil, errors.New("上游钱包配额缺失或无效")
+	}
+	// Strict wallet conversion deliberately does not use the legacy status fallback.
+	var status personalPricingCurrencyResponse
+	if err := personalPricingJSON(context.Background(), client, base, "/api/status", "", &status); err != nil {
+		return nil, errors.New("无法读取钱包配额换算配置")
+	}
+	if err := applyPersonalPricingCurrency(nil, status); err != nil {
+		return nil, err
+	}
+	quota := *res.Data.Quota
+	balanceYuan, points := quotaBillingValues(quota, *status.Data.QuotaPerUnit)
 	return map[string]any{
-		"quota":            quota,
-		"balanceYuan":      balanceYuan,
-		"points":           points,
-		"formattedPoints":  fmt.Sprintf("%.1f 积分", points),
-		"formattedBalance": fmt.Sprintf("¥ %.2f", balanceYuan),
-		"exchangeRate":     10.0,
-		"minTopup":         1,
+		"quota": quota, "balanceYuan": balanceYuan, "points": points,
+		"formattedPoints": formatBillingPoints(points), "formattedBalance": formatBillingMoney(balanceYuan),
+		"exchangeRate": 10.0, "minTopup": 1, "source": "newapi", "unit": "points",
 	}, nil
 }
 
@@ -976,28 +984,28 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 	for _, l := range res.Data {
 		moneyYuan, pointsCost := quotaBillingValues(l.Quota, quotaPerUnit)
 
-			// 解析关联任务信息
-			var taskID string
-			var videoURL string
-			var otherReason string
-			var preConsumedQuota int
-			if l.Other != "" {
-				var otherData struct {
-					TaskID           string `json:"task_id"`
-					Reason           string `json:"reason"`
-					PreConsumedQuota int    `json:"pre_consumed_quota"`
-					ActualQuota      int    `json:"actual_quota"`
-				}
-				if json.Unmarshal([]byte(l.Other), &otherData) == nil {
-					if otherData.TaskID != "" {
-						taskID = otherData.TaskID
-					}
-					if otherData.Reason != "" {
-						otherReason = otherData.Reason
-					}
-					preConsumedQuota = otherData.PreConsumedQuota
-				}
+		// 解析关联任务信息
+		var taskID string
+		var videoURL string
+		var otherReason string
+		var preConsumedQuota int
+		if l.Other != "" {
+			var otherData struct {
+				TaskID           string `json:"task_id"`
+				Reason           string `json:"reason"`
+				PreConsumedQuota int    `json:"pre_consumed_quota"`
+				ActualQuota      int    `json:"actual_quota"`
 			}
+			if json.Unmarshal([]byte(l.Other), &otherData) == nil {
+				if otherData.TaskID != "" {
+					taskID = otherData.TaskID
+				}
+				if otherData.Reason != "" {
+					otherReason = otherData.Reason
+				}
+				preConsumedQuota = otherData.PreConsumedQuota
+			}
+		}
 
 		lowerModel := strings.ToLower(l.ModelName)
 		isVideo := strings.Contains(lowerModel, "video") ||
@@ -1044,18 +1052,18 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 			videoURL = fmt.Sprintf("https://api.xybcloud.com/v1/videos/%s/content?key=%s", taskID, token)
 		}
 
-			taskAction := parseTaskAction(l.ModelName, l.Content, isVideo)
-			if preConsumedQuota > 0 && l.Type == 2 {
-				taskAction = "差额补扣"
-			}
+		taskAction := parseTaskAction(l.ModelName, l.Content, isVideo)
+		if preConsumedQuota > 0 && l.Type == 2 {
+			taskAction = "差额补扣"
+		}
 
-			// 判定任务状态与展示文案（彻底纠正免扣误解）
-			status := "success"
-			statusLabel := "成功"
-			if preConsumedQuota > 0 && l.Type == 2 {
-				statusLabel = "差额补扣"
-			}
-			progress := 100
+		// 判定任务状态与展示文案（彻底纠正免扣误解）
+		status := "success"
+		statusLabel := "成功"
+		if preConsumedQuota > 0 && l.Type == 2 {
+			statusLabel = "差额补扣"
+		}
+		progress := 100
 		errMsg := ""
 		errDetail := ""
 		formattedPoints := formatBillingPoints(pointsCost)

@@ -200,7 +200,8 @@ export function CanvasNodeMaskEditDialog({
                         <ModelPicker className="canvas-compact-control h-10" config={{ ...config, model, imageChannelId: channelId || config.imageChannelId }} value={model} channelId={channelId || config.imageChannelId} onChange={onModelChange} capability="image" onMissingConfig={onMissingConfig} fullWidth />
                     </div>
 
-                    <div className="mt-auto flex items-center justify-between gap-2">
+                    <p className="text-xs leading-5 opacity-75">预计积分需结合标记后的参考图计算；提交前尚无完整素材用量，不能按原图单价推算。最终按所选模型实际用量结算积分。</p>
+                    <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
                         <Button icon={<RotateCcw className="size-4" />} onClick={resetMask} disabled={submitting}>
                             重置
                         </Button>

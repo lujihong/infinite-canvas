@@ -32,6 +32,8 @@ import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel, imageFormatLabel, imageQualityLabel, imageSizeLabel, imageSizeOptions } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
+import { EstimatedCredits } from "@/components/estimated-credits";
+import { buildQuoteDescriptor } from "@/services/api/quote-descriptor";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -985,21 +987,13 @@ export default function ImagePage() {
             message.error("请输入生图提示词");
             return null;
         }
-        const baseConfig = { ...effectiveConfig, ...configOverride };
-        const requestModel = configOverride?.imageModel || configOverride?.model || model;
-        const requestChannelId = resolveImageChannelId(baseConfig, requestModel, configOverride?.imageChannelId, configOverride?.activeChannelId, baseConfig.imageChannelId, baseConfig.activeChannelId);
-        if (!isAiConfigReady(baseConfig, requestModel)) {
+        const snapshot = normalizeImageRequestSnapshot(effectiveConfig, text, referenceItems, taskCount, configOverride);
+        if (!isAiConfigReady(snapshot.requestConfig, snapshot.requestConfig.model)) {
             message.warning("请先完成配置");
             openConfigDialog(true);
             return null;
         }
-        const requestConfig = { ...baseConfig, model: requestModel, imageModel: requestModel, activeChannelId: requestChannelId, imageChannelId: requestChannelId, count: "1" };
-        return {
-            text,
-            requestConfig,
-            displayConfig: buildGenerationLogConfig({ ...requestConfig, count: String(taskCount) }),
-            references: [...referenceItems],
-        };
+        return snapshot;
     };
 
     const runGenerationTask = async (resultId: string, snapshot: RequestSnapshot) => {
@@ -1355,6 +1349,9 @@ function WorkbenchPanel({
     uploadingCount: number;
 }) {
     const [bottomSettingsCollapsed, setBottomSettingsCollapsed] = useState(true);
+    const generationCount = Math.max(1, Math.min(10, Number(useConfigStore((state) => state.config.count)) || 1));
+    const snapshot = normalizeImageRequestSnapshot(config, prompt, references, generationCount);
+    const estimatedCredits = <EstimatedCredits className="font-semibold" config={snapshot.requestConfig} descriptor={buildQuoteDescriptor({ config: snapshot.requestConfig, mode: "image", prompt: snapshot.text, references: { references: snapshot.references }, batchCount: Number(snapshot.displayConfig.count), batchMode: "separate" })} />;
 
     if (layout === "bottom") {
         return (
@@ -1429,6 +1426,7 @@ function WorkbenchPanel({
                                 {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
                             </Button>
                         </div>
+                        <div className="w-full text-right">{estimatedCredits}</div>
                         {references.length || uploadingCount > 0 ? <ReferenceStrip className="mt-3" references={references} compact onRemoveReference={onRemoveReference} uploadingCount={uploadingCount} /> : null}
                     </div>
                 </div>
@@ -1477,6 +1475,7 @@ function WorkbenchPanel({
                 </div>
             </div>
             <div className="shrink-0 border-t border-stone-200 p-4 dark:border-stone-800">
+                <div className="mb-2 text-center">{estimatedCredits}</div>
                 <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
                     {pendingCount ? `继续提交（${pendingCount} 个生成中）` : "开始生成"}
                 </Button>
@@ -1970,7 +1969,8 @@ function FailedImageCard({ result, error, onCopyPrompt, onRetry }: { result: Gen
                 </Typography.Paragraph>
             </div>
             <TaskInfo result={result} error={error} onCopyPrompt={onCopyPrompt} />
-            <div className="flex justify-end gap-2 border-t border-red-200 p-3 dark:border-red-950">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-red-200 p-3 dark:border-red-950">
+                <ImageRetryCredits item={result} count={1} />
                 <Button size="small" onClick={() => setDetailOpen(true)}>
                     详情
                 </Button>
@@ -2162,6 +2162,7 @@ function HistoryLogCard({
                 ) : null}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 border-t border-stone-200 px-2.5 py-2 dark:border-stone-800">
+                <ImageRetryCredits item={log} count={Number(log.config.count) || 1} />
                 <div ref={categoryMenuRef} className="relative flex flex-wrap gap-1">
                     <Button size="small" onClick={() => closeThen(onPreview)}>
                         载入
@@ -2760,6 +2761,21 @@ function resolveImageChannelId(config: AiConfig, model: string, ...preferredIds:
         if (channelId && channels.some((channel) => channel.id === channelId && channel.models.includes(model))) return channelId;
     }
     return channels.find((channel) => channel.models.includes(model))?.id || "";
+}
+
+function normalizeImageRequestSnapshot(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, override?: Partial<GenerationLogConfig>): RequestSnapshot {
+    const baseConfig = { ...config, ...override };
+    const model = override?.imageModel || override?.model || config.imageModel || config.model;
+    const channelId = resolveImageChannelId(baseConfig, model, override?.imageChannelId, override?.activeChannelId, baseConfig.imageChannelId, baseConfig.activeChannelId);
+    const requestConfig = { ...baseConfig, model, imageModel: model, activeChannelId: channelId, imageChannelId: channelId, count: "1" };
+    return { text: prompt.trim(), requestConfig, displayConfig: buildGenerationLogConfig({ ...requestConfig, count: String(count) }), references: [...references] };
+}
+
+function ImageRetryCredits({ item, count }: { item: GenerationResult | GenerationLog; count: number }) {
+    const config = useEffectiveConfig();
+    const channelId = imageTaskChannelId(item.task);
+    const snapshot = normalizeImageRequestSnapshot(config, item.prompt, item.references, count, { ...item.config, ...(channelId ? { imageChannelId: channelId, activeChannelId: channelId } : {}) });
+    return <div className="w-full text-xs font-medium"><span>重试 · </span><EstimatedCredits config={snapshot.requestConfig} descriptor={buildQuoteDescriptor({ config: snapshot.requestConfig, mode: "image", prompt: snapshot.text, references: { references: snapshot.references }, batchCount: Number(snapshot.displayConfig.count), batchMode: "separate" })} /></div>;
 }
 
 function buildGenerationLogConfig(config: AiConfig): GenerationLogConfig {

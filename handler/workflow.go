@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -37,6 +38,27 @@ func DeleteUserWorkflow(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	OK(w, true)
+}
+
+func QuoteUserWorkflowDraft(w http.ResponseWriter, r *http.Request) {
+	var request service.WorkflowAgentDraftQuoteRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		// Never echo the payload or decoder error: unknown fields may be credentials.
+		Fail(w, "工作流报价需求格式错误，仅支持 prompt、model、channelMode、channelId")
+		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		Fail(w, "工作流报价需求格式错误")
+		return
+	}
+	result, err := service.QuoteCreativeWorkflowDraft(r.Context(), request)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, result)
 }
 
 func DraftUserWorkflow(w http.ResponseWriter, r *http.Request) {

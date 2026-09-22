@@ -112,8 +112,7 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] | VideoReferenceInput = [], onProgress?: VideoProgressHandler, options?: string | VideoTaskCreateOptions): Promise<CreatedVideoGenerationTask> {
     const model = config.model || config.videoModel;
-    const systemPrompt = (config.systemPrompts.video || config.systemPrompt).trim();
-    const body = await createVideoRequestBody(config, model, systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt, normalizeVideoReferenceInput(references));
+    const body = await createVideoRequestBody(config, model, withVideoSystemPrompt(config, prompt), normalizeVideoReferenceInput(references));
     const startedAt = Date.now();
     try {
         const createOptions = normalizeVideoTaskCreateOptions(options);
@@ -380,6 +379,37 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
         return body;
     }
 
+    const { body: scalars, referencePolicy, kieKlingV3, kieKlingOmni, klingV3 } = createVideoFormScalars(config, model, prompt);
+    const body = new FormData();
+    Object.entries(scalars).forEach(([key, value]) => body.append(key, value));
+    if (klingV3 && kieKlingOmni !== "transformation") {
+        const elementList = await (kieKlingV3 ? normalizeKIEKlingElementList(config.videoElementList) : normalizeKlingElementList(config.videoElementList));
+        if (elementList.length) body.append("element_list", JSON.stringify(elementList));
+    }
+    const files = await Promise.all(input.references.slice(0, referencePolicy.imageLimit).map(imageReferenceToFormValue));
+    files.forEach((file) => body.append("input_reference[]", file));
+    if (referencePolicy.frames && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame));
+    if (referencePolicy.frames && input.lastFrame) body.append("last_frame_url", await imageReferenceToFormValue(input.lastFrame));
+    const videoFiles = await Promise.all(input.videoReferences.slice(0, referencePolicy.videoLimit).map(mediaReferenceToFormValue));
+    videoFiles.forEach((file) => body.append("video_reference[]", file));
+    const audioFiles = referencePolicy.audio ? await Promise.all(input.audioReferences.map(mediaReferenceToFormValue)) : [];
+    audioFiles.forEach((file) => body.append("audio_reference[]", file));
+    return body;
+}
+
+export function withVideoSystemPrompt(config: AiConfig, prompt: string) {
+    const systemPrompt = (config.systemPrompts.video || config.systemPrompt).trim();
+    return systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+}
+
+/** Null means the request uses a different (non-FormData) protocol. No media or account access. */
+export function createVideoRequestScalars(config: AiConfig, model: string, prompt: string) {
+    if ((isGeminiVideoModel(model) && isGeminiConfig(config, model)) || isGrok2APIVideoConfig(config, model) || isMiniMaxH3Config(config, model) || isCogVideoX3Model(model) || isAgnesVideoV25Model(model) || isAgnesVideoModel(model)) return null;
+    return createVideoFormScalars(config, model, prompt);
+}
+
+function createVideoFormScalars(config: AiConfig, model: string, prompt: string) {
+    const size = normalizeVideoSize(config.size);
     const klingV26 = isAPIMartKlingV26VideoConfig(config, model);
     const apimartKlingV3 = isAPIMartKlingV3VideoConfig(config, model);
     const apimartMotionControl = isAPIMartKlingMotionControlVideoConfig(config, model);
@@ -389,9 +419,8 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     const motionControl = apimartMotionControl || kieMotionControl;
     const klingV3 = apimartKlingV3 || kieKlingV3;
     const kling = klingV26 || klingV3;
-    const body = new FormData();
-    body.append("model", model);
-    body.append("prompt", prompt);
+    const fields: Record<string, string> = { model, prompt };
+    const body = { append: (key: string, value: string) => { fields[key] = value; } };
     if (kling) {
         body.append("mode", klingV3 ? normalizeKlingV3Mode(config.videoMode) : normalizeKlingV26Mode(config.videoMode));
         body.append("duration", klingV3 ? normalizeKlingV3Duration(config.videoSeconds) : normalizeKlingV26Duration(config.videoSeconds));
@@ -408,10 +437,6 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
                 if (shotType === "customize") body.append("multi_prompt", JSON.stringify(kieKlingV3 ? normalizeKIEKlingMultiPrompt(config.videoMultiPrompt) : normalizeKlingMultiPrompt(config.videoMultiPrompt)));
             }
         }
-        if (klingV3 && kieKlingOmni !== "transformation") {
-            const elementList = await (kieKlingV3 ? normalizeKIEKlingElementList(config.videoElementList) : normalizeKlingElementList(config.videoElementList));
-            if (elementList.length) body.append("element_list", JSON.stringify(elementList));
-        }
     } else if (apimartMotionControl) {
         body.append("mode", normalizeAPIMartKlingMotionControlMode(config.vquality));
     } else {
@@ -424,16 +449,13 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
     }
     if (motionControl) body.append("character_orientation", normalizeCharacterOrientation(config.videoCharacterOrientation));
     if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, false)));
-    const imageReferenceLimit = kieKlingOmni === "text-to-video" ? 0 : kieKlingOmni === "reference-to-video" ? input.references.length : kieKlingOmni === "transformation" ? 4 : kling ? 2 : 9;
-    const files = await Promise.all(input.references.slice(0, imageReferenceLimit).map(imageReferenceToFormValue));
-    files.forEach((file) => body.append("input_reference[]", file));
-    if (!kling && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame));
-    if (!kling && input.lastFrame) body.append("last_frame_url", await imageReferenceToFormValue(input.lastFrame));
-    const videoFiles = kling && kieKlingOmni !== "reference-to-video" && kieKlingOmni !== "transformation" ? [] : await Promise.all(input.videoReferences.slice(0, kieKlingOmni ? 1 : input.videoReferences.length).map(mediaReferenceToFormValue));
-    videoFiles.forEach((file) => body.append("video_reference[]", file));
-    const audioFiles = kling ? [] : await Promise.all(input.audioReferences.map(mediaReferenceToFormValue));
-    audioFiles.forEach((file) => body.append("audio_reference[]", file));
-    return body;
+    const referencePolicy = {
+        imageLimit: kieKlingOmni === "text-to-video" ? 0 : kieKlingOmni === "reference-to-video" ? Infinity : kieKlingOmni === "transformation" ? 4 : kling ? 2 : 9,
+        videoLimit: kling && kieKlingOmni !== "reference-to-video" && kieKlingOmni !== "transformation" ? 0 : kieKlingOmni ? 1 : Infinity,
+        frames: !kling,
+        audio: !kling,
+    };
+    return { body: fields, kling, klingV3, kieKlingV3, kieKlingOmni, referencePolicy };
 }
 
 async function createMiniMaxH3VideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {

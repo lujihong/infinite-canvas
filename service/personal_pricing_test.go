@@ -22,7 +22,7 @@ func personalCurrencyFixture(w http.ResponseWriter, r *http.Request) bool {
 	if r.Header.Get("Authorization") != "" {
 		panic("public currency request leaked credential")
 	}
-	fmt.Fprint(w, `{"success":true,"data":{"quota_display_type":"CNY","usd_exchange_rate":1}}`)
+	fmt.Fprint(w, `{"success":true,"data":{"quota_display_type":"CNY","usd_exchange_rate":1,"quota_per_unit":500000}}`)
 	return true
 }
 
@@ -55,7 +55,7 @@ func TestPersonalPricingTwoIdentities(t *testing.T) {
 			t.Fatalf("missing groups: %+v", items)
 		}
 		item := items[0]
-		if *item.GroupQuotes[0].USDPrice != tc.want || !item.Estimated || !strings.Contains(item.FormattedPointsCost, " 起") || !strings.Contains(item.FormattedPointsCost, "按平台账单结算") {
+		if *item.GroupQuotes[0].USDPrice != tc.want || !item.Estimated || item.PointsCost != nil || *item.GroupQuotes[0].PointsCost != tc.want*10 || !strings.Contains(item.FormattedPointsCost, "vip：") || !strings.Contains(item.FormattedPointsCost, "按平台账单结算") {
 			t.Fatalf("incorrect personal quote: %+v", item)
 		}
 		if item.Discount == nil || item.Discount.Revision == nil {
@@ -117,32 +117,38 @@ func TestPersonalPricingOnlyAccessibleGroups(t *testing.T) {
 		t.Fatalf("wrong allowed groups: %+v", items)
 	}
 	encoded, err := json.Marshal(items[0])
-	if err != nil || !strings.Contains(string(encoded), `"points_cost":null`) {
-		t.Fatalf("unverified points must be null: %s, %v", encoded, err)
+	if err != nil || !strings.Contains(string(encoded), `"points_cost":10`) {
+		t.Fatalf("single group fixed quote must carry points: %s, %v", encoded, err)
 	}
 }
 
-func TestPersonalPricingCurrencyMatchesGatewayConfiguration(t *testing.T) {
-	for _, tc := range []struct {
-		kind  string
-		rate  float64
-		want  string
-		valid bool
-	}{
-		{"CNY", 7, "¥ 14/次", true}, {"CNY", 1, "¥ 2/次", true}, {"USD", 0, "USD 2/次", true}, {"CNY", 0, "", false}, {"invalid", 1, "", false},
-	} {
-		base, price := 2.0, 2.0
-		items := []PersonalModelPricingItem{{GroupQuotes: []PersonalGroupQuote{{BaseUSD: &base, USDPrice: &price, Unit: "USD/次"}}}}
-		status := personalPricingCurrencyResponse{Success: true}
-		status.Data.Type = tc.kind
-		status.Data.Rate = tc.rate
-		err := applyPersonalPricingCurrency(items, status)
-		if (err == nil) != tc.valid {
-			t.Fatalf("currency %s error %v", tc.kind, err)
-		}
-		if tc.valid && !strings.Contains(items[0].FormattedPointsCost, tc.want) {
-			t.Fatalf("want %s got %s", tc.want, items[0].FormattedPointsCost)
-		}
+func TestPersonalPricingCurrencyIndependent(t *testing.T) {
+	var first string
+	for _, kind := range []string{"USD", "CNY", "CUSTOM", "TOKENS", "unknown"} {
+		t.Run(kind, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/status" {
+					fmt.Fprintf(w, `{"success":true,"data":{"quota_per_unit":500000,"quota_display_type":%q,"usd_exchange_rate":7.2,"custom_currency_exchange_rate":100,"custom_currency_symbol":"X"}}`, kind)
+				} else {
+					fmt.Fprint(w, personalPriceFixture(.1))
+				}
+			}))
+			defer server.Close()
+			items, err := fetchPersonalModelPricingList(context.Background(), server.URL, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(items)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first == "" {
+				first = string(encoded)
+			}
+			if string(encoded) != first || *items[0].GroupQuotes[0].PointsCost != 2 || *items[0].GroupQuotes[1].PointsCost != 4 {
+				t.Fatalf("currency changed points: %s", encoded)
+			}
+		})
 	}
 }
 
@@ -167,14 +173,14 @@ func TestPersonalPricingTieredAndZeroDiscount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if items[0].FormattedPointsCost != "按实际用量结算" || items[0].GroupQuotes[0].USDPrice != nil || items[0].BillingExpr == "" {
+	if !strings.Contains(items[0].FormattedPointsCost, "待参数报价") || items[0].GroupQuotes[0].PointsCost != nil || items[0].GroupQuotes[0].USDPrice != nil || items[0].BillingExpr == "" {
 		t.Fatal("tiered incorrectly presented as zero/free")
 	}
 	if items[1].GroupQuotes[0].USDPrice == nil || *items[1].GroupQuotes[0].USDPrice != 0 || items[1].Discount.Factor != 0 {
 		t.Fatal("lost legitimate zero discount")
 	}
 	quote := items[2].GroupQuotes[0]
-	if *quote.USDPrice != 0.002 || *quote.OutputUSDPrice != 0.006 || quote.Unit != "USD/千Token" {
+	if *quote.USDPrice != 0.002 || *quote.OutputUSDPrice != 0.006 || quote.Unit != "积分/千Token" || *quote.PointsCost != .02 || *quote.OutputPointsCost != .06 {
 		t.Fatalf("incorrect token units: %+v", quote)
 	}
 }

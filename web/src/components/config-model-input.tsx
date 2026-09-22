@@ -163,7 +163,8 @@ export function ConfigModelInput({
         }
 
         const result: Array<{ value: string; label: React.ReactNode; disabled?: boolean }> = matched.map((item) => {
-            const pricing = getModelPricing(item.model);
+            const officialQuote = item.channelId === "xyb-official-exclusive" || (config.channelMode === "remote" && (!item.channelId || item.channelId === "remote-default"));
+            const pricing = officialQuote ? getModelPricing(item.model) : undefined;
             const isSelected = (value || "").trim().toLowerCase() === item.model.toLowerCase();
             const isRecommendedAudio = item.channelId === "recommended-audio";
             return {
@@ -205,7 +206,7 @@ export function ConfigModelInput({
                                         {pricing.formatted_points_cost}
                                     </span>
                                 ) : (
-                                    <span>{personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
+                                    <span>{!officialQuote ? "自有渠道 · 不使用本站积分报价" : personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
                                 )}
                             </span>
                             {item.channelName ? (

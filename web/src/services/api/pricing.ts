@@ -102,6 +102,6 @@ export function usePersonalPricing(active = true) {
 
 export function personalPricingDetails(pricing: ModelPricingItem): string {
     const discount = pricing.discount ? `本人优惠倍率 ${pricing.discount.factor}（来源：${pricing.discount.source}）` : "";
-    const groups = pricing.group_quotes.map(quote => `${quote.group}：${quote.formatted_points_cost}；最终倍率 ${quote.final_ratio}${quote.base_usd === undefined ? "" : `；基价 ${quote.base_usd} ${quote.unit}`}`);
+    const groups = pricing.group_quotes.map(quote => `${quote.group}：${quote.formatted_points_cost}；最终倍率 ${quote.final_ratio}`);
     return [discount, pricing.billing_description, ...groups, pricing.billing_expr ? `计费表达式：${pricing.billing_expr}` : ""].filter(Boolean).join("\n");
 }

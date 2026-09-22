@@ -7,7 +7,7 @@ import { Button, Segmented } from "antd";
 import { ModelPicker } from "@/components/model-picker";
 import { usePersonalPricing } from "@/services/api/pricing";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol, formatModelCostTag, requestCreditCost } from "@/constant/credits";
+import { EstimatedCredits, type EstimatedCreditsProps } from "@/components/estimated-credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -18,6 +18,7 @@ import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from ".
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
+    generationQuote?: EstimatedCreditsProps;
     isRunning: boolean;
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
     videoFrameOptions?: CanvasVideoFrameOption[];
@@ -27,16 +28,14 @@ type CanvasConfigNodePanelProps = {
     onComposerToggle: () => void;
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, inputSummary, videoFrameOptions = [], videoResourceOptions = [], onConfigChange, onGenerate, onComposerToggle }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, generationQuote, isRunning, inputSummary, videoFrameOptions = [], videoResourceOptions = [], onConfigChange, onGenerate, onComposerToggle }: CanvasConfigNodePanelProps) {
     usePersonalPricing();
     const globalConfig = useEffectiveConfig();
-    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = node.metadata?.generationMode || "image";
     const config = buildNodeConfig(globalConfig, node, mode);
-    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? count : 1, mode });
+    const quoteProps = generationQuote || { config, descriptor: null };
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
@@ -121,16 +120,13 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, videoFram
 
             <Button
                 type="primary"
-                className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg"
+                className="mt-auto !h-auto !min-h-9 !w-full !cursor-pointer !whitespace-normal !rounded-lg !py-1.5"
                 disabled={isRunning || !canGenerate}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={() => onGenerate(node.id)}
             >
-                <span className="inline-flex items-center gap-1.5 font-medium">
-                    <span className="inline-flex items-center gap-1 rounded bg-black/15 px-1.5 py-0.5 text-xs font-semibold dark:bg-white/15">
-                        <CreditSymbol />
-                        <span>{formatModelCostTag({ model: config.model, mode, count, seconds: config.videoSeconds, resolution: config.vquality || config.size, modelCosts })}</span>
-                    </span>
+                <span className="inline-flex min-w-0 flex-wrap items-center justify-center gap-1.5 font-medium">
+                    <EstimatedCredits {...quoteProps} className="rounded bg-black/15 px-1.5 py-0.5 dark:bg-white/15" />
                     {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
                     <span>开始生成</span>
                 </span>

@@ -7,7 +7,7 @@ import { Button, Modal, Tooltip } from "antd";
 import { ModelPicker } from "@/components/model-picker";
 import { usePersonalPricing } from "@/services/api/pricing";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol, formatModelCostTag, requestCreditCost } from "@/constant/credits";
+import { EstimatedCredits, type EstimatedCreditsProps } from "@/components/estimated-credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -27,6 +27,7 @@ export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
+    generationQuote?: EstimatedCreditsProps;
     isRunning: boolean;
     onPromptChange: (nodeId: string, prompt: string) => void;
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
@@ -42,10 +43,9 @@ type CanvasNodePromptPanelProps = {
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onOpenAiccPicker, onOpenMyAssetsPicker, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, generationQuote, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onOpenAiccPicker, onOpenMyAssetsPicker, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     usePersonalPricing();
     const globalConfig = useEffectiveConfig();
-    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
@@ -56,7 +56,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
     const [prompt, setPrompt] = useState(sourcePrompt);
     const [expanded, setExpanded] = useState(false);
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1, mode });
+    const quoteProps = generationQuote || { config, descriptor: null };
 
     useEffect(() => {
         setPrompt(sourcePrompt);
@@ -103,7 +103,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 placeholder={isPanorama ? "描述想生成的全景，或上传/连接图片作为参考" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 
-            <div className="mt-2.5 flex min-w-0 items-center justify-between gap-2">
+            <div className="mt-2.5 flex min-w-0 flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                     <Tooltip title="放大编辑">
                         <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={() => setExpanded(true)} aria-label="放大编辑" />
@@ -143,16 +143,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 </div>
                 <Button
                     type="primary"
-                    className="!h-10 shrink-0 !rounded-full !px-3.5"
+                    className="!h-auto !min-h-10 !max-w-full !whitespace-normal !rounded-full !px-3.5 !py-1.5"
                     disabled={isRunning || !canSubmit}
                     onClick={submit}
                     aria-label="生成"
                 >
-                    <span className="flex items-center gap-1.5 font-medium whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1 text-xs tabular-nums">
-                            <CreditSymbol />
-                            <span>{formatModelCostTag({ model: config.model, mode, count: mode === "image" ? config.count : 1, seconds: config.videoSeconds, resolution: config.vquality || config.size, modelCosts })}</span>
-                        </span>
+                    <span className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 font-medium">
+                        <EstimatedCredits {...quoteProps} />
                         {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
                     </span>
                 </Button>

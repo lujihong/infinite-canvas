@@ -40,6 +40,9 @@ type PersonalGroupQuote struct {
 	BaseUSD             *float64 `json:"base_usd,omitempty"`
 	USDPrice            *float64 `json:"usd_price,omitempty"`
 	OutputUSDPrice      *float64 `json:"output_usd_price,omitempty"`
+	PointsCost          *float64 `json:"points_cost"`
+	OutputPointsCost    *float64 `json:"output_points_cost"`
+	Quota               *int64   `json:"quota"`
 	Unit                string   `json:"unit"`
 	FormattedPointsCost string   `json:"formatted_points_cost"`
 }
@@ -48,9 +51,13 @@ type personalPricingResponse struct {
 	Success bool `json:"success"`
 	Data    []struct {
 		ModelPricingItem
-		BillingMode  string   `json:"billing_mode"`
-		BillingExpr  string   `json:"billing_expr"`
-		EnableGroups []string `json:"enable_groups"`
+		// Presence matters: an omitted price is not a free model.
+		ModelPrice      *float64 `json:"model_price"`
+		ModelRatio      *float64 `json:"model_ratio"`
+		CompletionRatio *float64 `json:"completion_ratio"`
+		BillingMode     string   `json:"billing_mode"`
+		BillingExpr     string   `json:"billing_expr"`
+		EnableGroups    []string `json:"enable_groups"`
 	} `json:"data"`
 	GroupRatio      map[string]float64               `json:"group_ratio"`
 	ModelGroupRatio map[string]map[string]float64    `json:"model_group_ratio"`
@@ -136,65 +143,81 @@ func fetchPersonalModelPricingList(ctx context.Context, base, token string) ([]P
 type personalPricingCurrencyResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
-		Type         string  `json:"quota_display_type"`
-		Rate         float64 `json:"usd_exchange_rate"`
-		CustomSymbol string  `json:"custom_currency_symbol"`
-		CustomRate   float64 `json:"custom_currency_exchange_rate"`
+		QuotaPerUnit *int64 `json:"quota_per_unit"`
 	} `json:"data"`
 }
 
 func applyPersonalPricingCurrency(items []PersonalModelPricingItem, status personalPricingCurrencyResponse) error {
-	if !status.Success {
-		return errors.New("无法读取平台货币配置")
+	if !status.Success || status.Data.QuotaPerUnit == nil || *status.Data.QuotaPerUnit <= 0 || *status.Data.QuotaPerUnit > 1<<53-1 {
+		return errors.New("平台 quota_per_unit 缺失或无效，无法换算积分")
 	}
-	symbol, rate := "USD", 1.0
-	switch status.Data.Type {
-	case "USD", "TOKENS":
-	case "CNY":
-		symbol, rate = "¥", status.Data.Rate
-	case "CUSTOM":
-		symbol, rate = status.Data.CustomSymbol, status.Data.CustomRate
-	default:
-		return errors.New("平台货币类型不明确，暂时无法报价")
-	}
-	if symbol == "" || !validPersonalPrice(rate) || rate == 0 {
-		return errors.New("平台货币换算配置无效")
-	}
+	quotaPerUnit := *status.Data.QuotaPerUnit
 	for i := range items {
 		item := &items[i]
-		if item.BillingMode == "tiered_expr" || item.BillingExpr != "" {
+		if item.BillingMode == "tiered_expr" || strings.TrimSpace(item.BillingExpr) != "" {
 			continue
 		}
-		lowest := -1.0
-		label := ""
+		labels := make([]string, 0, len(item.GroupQuotes))
 		for j := range item.GroupQuotes {
 			quote := &item.GroupQuotes[j]
-			if quote.USDPrice == nil {
-				continue
+			quote.Unit = "积分/千Token"
+			if item.QuotaType == 1 {
+				quote.Unit = "积分/次"
 			}
-			amount := *quote.USDPrice * rate
-			if !validPersonalPrice(amount) {
-				return errors.New("模型报价超出有效范围")
-			}
-			unit := strings.TrimPrefix(quote.Unit, "USD")
-			quote.FormattedPointsCost = fmt.Sprintf("%s %.6g%s", symbol, amount, unit)
-			if quote.OutputUSDPrice != nil {
-				output := *quote.OutputUSDPrice * rate
-				if !validPersonalPrice(output) {
-					return errors.New("模型输出报价超出有效范围")
+			if quote.USDPrice != nil {
+				if item.QuotaType == 1 {
+					// The ordinary fixed-price reservation/task/image path truncates quota.
+					// Text settlement rounds instead; endpoint metadata disambiguates it.
+					value := *quote.BaseUSD * float64(quotaPerUnit) * quote.FinalRatio
+					if !validPersonalPrice(value) || value > math.MaxInt32 {
+						return errors.New("模型报价超出有效配额范围")
+					}
+					rounded := math.Trunc(value)
+					for _, endpoint := range item.SupportedEndpointTypes {
+						if endpoint == "openai" || endpoint == "openai-response" || endpoint == "anthropic" || endpoint == "gemini" {
+							rounded = math.Round(value)
+							if value > 0 && rounded == 0 {
+								rounded = 1
+							}
+						}
+					}
+					quota := int64(rounded)
+					_, points := quotaBillingValues(quota, quotaPerUnit)
+					quote.Quota, quote.PointsCost = &quota, &points
+				} else {
+					// Unit rates stay fractional; actual token usage is rounded at settlement.
+					points := item.ModelRatio * quote.FinalRatio * (1000 / float64(quotaPerUnit)) * 10
+					if !validPersonalPrice(points) {
+						return errors.New("模型积分单价无效")
+					}
+					quote.PointsCost = &points
+					if quote.OutputUSDPrice != nil {
+						output := points * item.CompletionRatio
+						if !validPersonalPrice(output) {
+							return errors.New("模型输出积分单价无效")
+						}
+						quote.OutputPointsCost = &output
+					}
 				}
-				quote.FormattedPointsCost = fmt.Sprintf("输入 %s %.6g / 输出 %s %.6g%s", symbol, amount, symbol, output, unit)
+				quote.FormattedPointsCost = fmt.Sprintf("%.10g %s", *quote.PointsCost, quote.Unit)
+				if item.QuotaType == 0 {
+					output := "待参数报价"
+					if quote.OutputPointsCost != nil {
+						output = fmt.Sprintf("%.10g %s", *quote.OutputPointsCost, quote.Unit)
+					}
+					quote.FormattedPointsCost = "输入 " + quote.FormattedPointsCost + " / 输出 " + output
+				}
 			}
-			if lowest < 0 || amount < lowest {
-				lowest, label = amount, quote.FormattedPointsCost
-			}
+			labels = append(labels, quote.Group+"："+quote.FormattedPointsCost)
 		}
-		if lowest >= 0 {
-			if len(item.GroupQuotes) > 1 {
-				label += " 起"
-			}
-			item.FormattedPointsCost = label + " · 按平台账单结算"
-			item.BillingDescription = "采用平台当前货币配置及本人计费组倍率。实际用量和路由决定最终账单；积分不作确定报价。"
+		item.PointsCost = nil
+		if len(item.GroupQuotes) == 1 && item.QuotaType == 1 {
+			item.PointsCost = item.GroupQuotes[0].PointsCost
+		}
+		item.FormattedPointsCost = strings.Join(labels, "；") + " · 按平台账单结算"
+		item.BillingDescription = "按本人各计费组最终倍率估算积分，优惠已计入。实际路由、请求数量和用量决定最终扣费。"
+		if item.QuotaType == 0 {
+			item.BillingDescription += "输入/输出为每千Token普通单价；缓存、音频、工具等特殊计费项无法代表全价，按实际用量结算。"
 		}
 	}
 	return nil
@@ -207,6 +230,20 @@ func validPersonalPrice(value float64) bool {
 func personalPricingItems(res personalPricingResponse) ([]PersonalModelPricingItem, error) {
 	items := make([]PersonalModelPricingItem, 0, len(res.Data))
 	for _, raw := range res.Data {
+		for _, value := range []*float64{raw.ModelPrice, raw.ModelRatio, raw.CompletionRatio} {
+			if value != nil && !validPersonalPrice(*value) {
+				return nil, errors.New("本人模型价格字段无效")
+			}
+		}
+		if raw.ModelPrice != nil {
+			raw.ModelPricingItem.ModelPrice = *raw.ModelPrice
+		}
+		if raw.ModelRatio != nil {
+			raw.ModelPricingItem.ModelRatio = *raw.ModelRatio
+		}
+		if raw.CompletionRatio != nil {
+			raw.ModelPricingItem.CompletionRatio = *raw.CompletionRatio
+		}
 		item := PersonalModelPricingItem{ModelPricingItem: raw.ModelPricingItem, BillingMode: raw.BillingMode, BillingExpr: raw.BillingExpr, EnableGroups: raw.EnableGroups, GroupQuotes: []PersonalGroupQuote{}, Estimated: true}
 		item.PointsCost = nil
 		item.FormattedPointsCost = "暂时无法报价"
@@ -219,7 +256,7 @@ func personalPricingItems(res personalPricingResponse) ([]PersonalModelPricingIt
 		}
 		expression := raw.BillingMode == "tiered_expr" || strings.TrimSpace(raw.BillingExpr) != ""
 		if expression {
-			item.FormattedPointsCost = "按实际用量结算"
+			item.FormattedPointsCost = "待参数报价 · 按实际用量结算"
 			item.BillingDescription += "此模型采用阶梯/表达式计费，需根据实际用量、时长等参数结算，不能用基础单价判断免费。"
 		}
 		enabled := make(map[string]bool, len(raw.EnableGroups))
@@ -243,14 +280,24 @@ func personalPricingItems(res personalPricingResponse) ([]PersonalModelPricingIt
 			if !ok || !validPersonalPrice(ratio) {
 				return nil, errors.New("本人计费组报价不完整，暂时无法报价")
 			}
-			quote := PersonalGroupQuote{Group: group, FinalRatio: ratio, FormattedPointsCost: "按实际用量结算"}
+			quote := PersonalGroupQuote{Group: group, FinalRatio: ratio, FormattedPointsCost: "待参数报价 · 按实际用量结算"}
 			if !expression {
 				var baseUSD float64
 				switch raw.QuotaType {
 				case 1:
-					baseUSD, quote.Unit = raw.ModelPrice, "USD/次"
+					if raw.ModelPrice == nil {
+						quote.FormattedPointsCost = "待参数报价"
+						item.GroupQuotes = append(item.GroupQuotes, quote)
+						continue
+					}
+					baseUSD, quote.Unit = *raw.ModelPrice, "USD/次"
 				case 0:
-					baseUSD, quote.Unit = raw.ModelRatio*2/1000, "USD/千Token"
+					if raw.ModelRatio == nil {
+						quote.FormattedPointsCost = "待参数报价"
+						item.GroupQuotes = append(item.GroupQuotes, quote)
+						continue
+					}
+					baseUSD, quote.Unit = *raw.ModelRatio/500, "USD/千Token"
 				default:
 					return nil, errors.New("无法识别模型计费单位")
 				}
@@ -260,9 +307,9 @@ func personalPricingItems(res personalPricingResponse) ([]PersonalModelPricingIt
 				}
 				quote.BaseUSD, quote.USDPrice = &baseUSD, &usd
 				quote.FormattedPointsCost = fmt.Sprintf("%.6g %s", usd, quote.Unit)
-				if raw.QuotaType == 0 {
-					output := usd * raw.CompletionRatio
-					if !validPersonalPrice(raw.CompletionRatio) || !validPersonalPrice(output) {
+				if raw.QuotaType == 0 && raw.CompletionRatio != nil {
+					output := usd * *raw.CompletionRatio
+					if !validPersonalPrice(output) {
 						return nil, errors.New("本人输出单价无效")
 					}
 					quote.OutputUSDPrice = &output
@@ -270,20 +317,6 @@ func personalPricingItems(res personalPricingResponse) ([]PersonalModelPricingIt
 				}
 			}
 			item.GroupQuotes = append(item.GroupQuotes, quote)
-		}
-		if !expression && len(item.GroupQuotes) > 0 {
-			lowest := item.GroupQuotes[0]
-			for _, quote := range item.GroupQuotes[1:] {
-				if *quote.USDPrice < *lowest.USDPrice {
-					lowest = quote
-				}
-			}
-			item.FormattedPointsCost = lowest.FormattedPointsCost
-			if len(item.GroupQuotes) > 1 {
-				item.FormattedPointsCost += " 起"
-			}
-			item.FormattedPointsCost += " · 按平台账单结算"
-			item.BillingDescription += "当前积分换算口径待核实，仅展示美元基价及个人计费组报价，不代表确定的积分扣费。"
 		}
 		items = append(items, item)
 	}

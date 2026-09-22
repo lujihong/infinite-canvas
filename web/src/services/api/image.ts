@@ -158,7 +158,7 @@ function resolveRequestSize(quality: string | undefined, size: string) {
     return resolveSize(quality && QUALITY_BASE[quality] ? quality : "low", value);
 }
 
-function createImageRequestParams(config: AiConfig): ImageRequestParams {
+export function createImageRequestParams(config: AiConfig): ImageRequestParams {
     const normalizedQuality = normalizeQuality(config.quality);
     const zhipu = isZhipuImageModel(config.model);
     const quality = zhipu ? normalizeZhipuImageQuality(config.model, normalizedQuality) : normalizedQuality;
@@ -231,6 +231,32 @@ function applyImageGenerationOptions(body: Record<string, unknown>, config: AiCo
         body.stream = true;
         body.partial_images = params.streamPartialImages;
     }
+}
+
+export function imageUsesSeparateRequests(config: AiConfig) {
+    return isGeminiConfig(config) || config.apiMode === "responses" || config.apiMode === "chat" || config.codexCli || config.streamImages || isZhipuImageModel(config.model);
+}
+
+/** Pure request fields, shared by generation and multipart edit senders. */
+export function createImageRequestScalars(config: AiConfig, prompt: string, params = createImageRequestParams(config), operation: "generation" | "edit" = "generation") {
+    const body: Record<string, unknown> = { model: config.model, prompt: withPromptGuard(config, withSystemPrompt(config, prompt)) };
+    applyImageGenerationParams(body, config, params, operation);
+    applyImageGenerationOptions(body, config, params);
+    return body;
+}
+
+/** URLs here are already resolved identifiers; this factory never reads media. */
+export function createImageRequestDescription(config: AiConfig, prompt: string, urls: string[], isEdit = urls.length > 0) {
+    const params = createImageRequestParams(config);
+    if (isGeminiConfig(config) || isAgnesImageModel(config.model)) return null;
+    if (config.apiMode === "chat" && !isZhipuImageModel(config.model)) return { endpoint: "/v1/chat/completions", body: createChatImageBody(config, prompt, urls, params) };
+    if (config.apiMode === "responses" && !isZhipuImageModel(config.model)) return { endpoint: "/v1/responses", body: createResponsesImageBody(config, prompt, urls, params, isEdit) };
+    const body = createImageRequestScalars(config, prompt, params, isEdit ? "edit" : "generation");
+    if (isEdit && urls.length) {
+        if (isGrok2APIImageConfig(config)) body.images = urls.map(url => ({ url }));
+        else body.image = urls;
+    }
+    return { endpoint: isEdit ? "/v1/images/edits" : "/v1/images/generations", body };
 }
 
 function assertImageReferencesSupported(model: string, references: ReferenceImage[]) {
@@ -681,12 +707,7 @@ async function requestImageGenerationSingle(config: AiConfig & { seedIndex?: num
         );
     }
 
-    const body: Record<string, unknown> = {
-        model: config.model,
-        prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
-    };
-    applyImageGenerationParams(body, config, params);
-    applyImageGenerationOptions(body, config, params);
+    const body = createImageRequestScalars(config, prompt, params);
 
     const directProvider = !usesAccountProxy(config) ? directAIProviderForConfig(config) : null;
     if (directProvider) {
@@ -722,18 +743,8 @@ async function requestImageGenerationSingle(config: AiConfig & { seedIndex?: num
 }
 
 async function createGrokImageEditBody(config: AiConfig, prompt: string, references: ReferenceImage[], params: ImageRequestParams) {
-    const body: Record<string, unknown> = {
-        model: config.model,
-        prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
-        images: await Promise.all(references.map(async (image) => ({ url: await imageToDataUrl(image) }))),
-    };
-    if (params.n > 1) body.n = params.n;
-    applyImageGenerationParams(body, config, params, "edit");
-    if (config.responseFormatB64Json) body.response_format = "b64_json";
-    if (config.streamImages) {
-        body.stream = true;
-        body.partial_images = params.streamPartialImages;
-    }
+    const body = createImageRequestScalars(config, prompt, params, "edit");
+    body.images = await Promise.all(references.map(async (image) => ({ url: await imageToDataUrl(image) })));
     return body;
 }
 
@@ -773,16 +784,7 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
 
     const mime = IMAGE_MIME;
     const formData = new FormData();
-    formData.set("model", config.model);
-    formData.set("prompt", withPromptGuard(config, withSystemPrompt(config, prompt)));
-    if (params.n > 1) formData.set("n", String(params.n));
-    if (params.size) formData.set("size", params.size);
-    if (params.quality && !config.codexCli) formData.set("quality", params.quality);
-    if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
-    if (config.streamImages) {
-        formData.set("stream", "true");
-        formData.set("partial_images", String(params.streamPartialImages));
-    }
+    Object.entries(createImageRequestScalars(config, prompt, params, "edit")).forEach(([key, value]) => formData.set(key, String(value)));
     const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     files.forEach((file) => formData.append("image", file));
 
@@ -868,15 +870,20 @@ function createChatImageBody(config: AiConfig, prompt: string, inputImageDataUrl
     };
 }
 
-async function requestResponsesSingle(config: AiConfig, prompt: string, inputImageDataUrls: string[], params: ImageRequestParams): Promise<GeneratedImage[]> {
-    const mime = IMAGE_MIME;
+function createResponsesImageBody(config: AiConfig, prompt: string, urls: string[], params: ImageRequestParams, isEdit = urls.length > 0) {
     const body: Record<string, unknown> = {
         model: config.model,
-        input: createResponsesInput(config, withSystemPrompt(config, prompt), inputImageDataUrls),
-        tools: [createResponsesImageTool(config, params, inputImageDataUrls.length > 0)],
+        input: createResponsesInput(config, withSystemPrompt(config, prompt), urls),
+        tools: [createResponsesImageTool(config, params, isEdit)],
         tool_choice: "required",
     };
     if (config.streamImages) body.stream = true;
+    return body;
+}
+
+async function requestResponsesSingle(config: AiConfig, prompt: string, inputImageDataUrls: string[], params: ImageRequestParams): Promise<GeneratedImage[]> {
+    const mime = IMAGE_MIME;
+    const body = createResponsesImageBody(config, prompt, inputImageDataUrls, params);
 
     return requestAndParseImages(
         config,
@@ -952,7 +959,7 @@ async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?
     assertImageReferencesSupported(config.model, references);
     const params = createImageRequestParams(config);
     const inputImageDataUrls = references.length ? await Promise.all(references.map((image) => imageToDataUrl(image))) : [];
-    const useConcurrentSingleRequests = isGeminiConfig(config) || config.apiMode === "responses" || config.apiMode === "chat" || config.codexCli || config.streamImages || isZhipuImageModel(config.model);
+    const useConcurrentSingleRequests = imageUsesSeparateRequests(config);
     if (params.n > 1 && useConcurrentSingleRequests) {
         const results = await Promise.allSettled(Array.from({ length: params.n }, () => requestImages({ ...config, count: "1" }, prompt, references)));
         const images = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
@@ -1084,13 +1091,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
     }
     if (config.apiMode === "responses" && !isZhipuImageModel(config.model)) {
         const inputImageDataUrls = references.length ? await Promise.all(references.map((image) => imageToDataUrl(image))) : [];
-        const body: Record<string, unknown> = {
-            model: config.model,
-            input: createResponsesInput(config, withSystemPrompt(config, prompt), inputImageDataUrls),
-            tools: [createResponsesImageTool(config, params, inputImageDataUrls.length > 0)],
-            tool_choice: "required",
-        };
-        if (config.streamImages) body.stream = true;
+        const body = createResponsesImageBody(config, prompt, inputImageDataUrls, params);
         return {
             method: "POST",
             headers: jsonHeaders,
@@ -1114,16 +1115,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
         formData.set("_canvas_task_id", meta.clientTaskId);
         formData.set("_canvas_prompt", meta.prompt);
         if (meta.channelId) formData.set("_canvas_channel_id", meta.channelId);
-        formData.set("model", config.model);
-        formData.set("prompt", withPromptGuard(config, withSystemPrompt(config, prompt)));
-        if (params.n > 1) formData.set("n", String(params.n));
-        if (params.quality && !config.codexCli) formData.set("quality", params.quality);
-        if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
-        if (config.streamImages) {
-            formData.set("stream", "true");
-            formData.set("partial_images", String(params.streamPartialImages));
-        }
-        if (params.size) formData.set("size", params.size);
+        Object.entries(createImageRequestScalars(config, prompt, params, "edit")).forEach(([key, value]) => formData.set(key, String(value)));
         const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
         files.forEach((file) => formData.append("image", file));
         return { method: "POST", headers: tokenHeaders, body: formData };
@@ -1140,12 +1132,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
             body: JSON.stringify({ endpoint: "/images/generations", ...meta, request: body }),
         };
     }
-    const body: Record<string, unknown> = {
-        model: config.model,
-        prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
-    };
-    applyImageGenerationParams(body, config, params);
-    applyImageGenerationOptions(body, config, params);
+    const body = createImageRequestScalars(config, prompt, params);
     return {
         method: "POST",
         headers: jsonHeaders,

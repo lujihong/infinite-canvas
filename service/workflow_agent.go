@@ -13,6 +13,61 @@ import (
 	"github.com/tigerowo/infinite-canvas/repository"
 )
 
+// WorkflowAgentDraftQuoteRequest deliberately excludes credentials and reference data.
+type WorkflowAgentDraftQuoteRequest struct {
+	Prompt      string `json:"prompt"`
+	Model       string `json:"model"`
+	ChannelMode string `json:"channelMode"`
+	ChannelID   string `json:"channelId"`
+}
+
+type WorkflowAgentDraftQuote struct {
+	Model   string `json:"model"`
+	Points  int    `json:"points"`
+	Source  string `json:"source"`
+	Unit    string `json:"unit"`
+	Message string `json:"message"`
+}
+
+// QuoteCreativeWorkflowDraft uses the same fixed per-call credits as drafting.
+// It never sends a provider request, consumes credits, or records a call log.
+func QuoteCreativeWorkflowDraft(ctx context.Context, request WorkflowAgentDraftQuoteRequest) (WorkflowAgentDraftQuote, error) {
+	user, ok := UserFromContext(ctx)
+	if !ok || user.ID == "" {
+		return WorkflowAgentDraftQuote{}, safeMessageError{message: "请先登录"}
+	}
+	if strings.TrimSpace(request.Prompt) == "" {
+		return WorkflowAgentDraftQuote{}, safeMessageError{message: "请输入工作流需求"}
+	}
+	if request.ChannelMode == "local" {
+		return WorkflowAgentDraftQuote{Model: strings.TrimSpace(request.Model), Points: 0, Source: "local_credits", Unit: "request", Message: "本地直连不收本站积分，供应商费用另计（未估算）"}, nil
+	}
+	modelName, err := workflowDraftModel(request.Model)
+	if err != nil {
+		return WorkflowAgentDraftQuote{}, err
+	}
+	// Match UserCanUseRemoteModelChannel permissions without PublicSettings' network discovery.
+	if user.Role != model.UserRoleAdmin {
+		settings, err := repository.GetSettings()
+		if err != nil {
+			return WorkflowAgentDraftQuote{}, err
+		}
+		allowed := settings.Public.ModelChannel.AllowUserRemoteChannel
+		if allowed == nil || !*allowed {
+			return WorkflowAgentDraftQuote{}, safeMessageError{message: "当前账号未开放云端渠道"}
+		}
+	}
+	// Validate the same server-side channel selection without inspecting or exposing its credentials.
+	if _, err := workflowDraftChannel(WorkflowAgentDraftRequest{Model: modelName, ChannelMode: request.ChannelMode, ChannelID: request.ChannelID}, modelName); err != nil {
+		return WorkflowAgentDraftQuote{}, err
+	}
+	points, err := ModelCost(modelName)
+	if err != nil {
+		return WorkflowAgentDraftQuote{}, err
+	}
+	return WorkflowAgentDraftQuote{Model: modelName, Points: points, Source: "local_credits", Unit: "request", Message: "按次扣本站积分"}, nil
+}
+
 func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftRequest) (WorkflowAgentDraftResponse, error) {
 	startedAt := time.Now()
 	user, ok := UserFromContext(ctx)

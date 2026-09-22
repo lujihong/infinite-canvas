@@ -9,17 +9,45 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
+import { EstimatedCredits } from "@/components/estimated-credits";
+import { buildQuoteDescriptor } from "@/services/api/quote-descriptor";
+import { useRequestQuote, type QuoteDescriptor, type RequestQuote } from "@/services/api/request-quote";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { createCanvasImageTask, requestEdit, requestGeneration, requestImageQuestion, type CanvasImageTask } from "@/services/api/image";
 import { saveImageGenerationLogs } from "@/services/api/generation-logs";
 import { deleteUserWorkflow, draftUserWorkflow, fetchUserConfig, fetchUserWorkflows, saveUserWorkflow, type CreativeWorkflowRecord } from "@/services/api/user-config";
+import { apiPost } from "@/services/api/request";
 import { deleteStoredImages, imageToDataUrl, uploadImage } from "@/services/image-storage";
 import { channelProtocolForConfig, defaultConfig, localChannelForActiveModel, normalizeLocalChannels, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
+
+type WorkflowDraftQuote = { model: string; points: number; source: "local_credits"; unit: "request"; message: string };
+
+function WorkflowDraftCredits({ token, active, prompt, model, channelMode, channelId }: { token?: string | null; active: boolean; prompt: string; model: string; channelMode: string; channelId?: string }) {
+    const text = prompt.trim();
+    const key = JSON.stringify([token, active, text, model, channelMode, channelId]);
+    const [result, setResult] = useState<{ key: string; quote?: WorkflowDraftQuote; error?: string } | null>(null);
+    useEffect(() => {
+        if (!active || !token || !text) return;
+        let cancelled = false;
+        const timer = setTimeout(() => {
+            void apiPost<WorkflowDraftQuote>("/api/v1/workflows/agent-draft/quote", { prompt: text, model, channelMode, channelId }, token)
+                .then((quote) => {
+                    if (quote.source !== "local_credits" || quote.unit !== "request" || !Number.isSafeInteger(quote.points) || quote.points < 0) throw new Error("报价返回异常");
+                    if (!cancelled) setResult({ key, quote });
+                })
+                .catch((error: unknown) => { if (!cancelled) setResult({ key, error: error instanceof Error ? error.message : "报价请求失败" }); });
+        }, 250);
+        return () => { cancelled = true; clearTimeout(timer); };
+    }, [key, active, token, text, model, channelMode, channelId]);
+    const current = result?.key === key ? result : null;
+    const label = !token ? "登录后查看预计积分" : !text ? "输入工作流需求后查看预计积分" : current?.error ? `预计积分暂不可用：${current.error}` : current?.quote ? channelMode === "local" ? current.quote.message : `预计 ${current.quote.points} 积分/次（本站积分）` : "正在计算预计积分…";
+    return <div className="text-xs font-semibold" aria-live="polite">{label}</div>;
+}
 
 type WorkflowVariableType = "text" | "textarea" | "number" | "select" | "boolean";
 type WorkflowMode = "single_image" | "multi_image_series";
@@ -255,6 +283,7 @@ export function CreativeWorkflowWorkspace({
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const token = useUserStore((state) => state.token);
+    const quoteUserId = useUserStore((state) => state.user?.id);
     const isUserReady = useUserStore((state) => state.isReady);
     const [workflows, setWorkflows] = useState<CreativeWorkflow[]>([]);
     const [editingWorkflow, setEditingWorkflow] = useState<CreativeWorkflow | null>(null);
@@ -302,6 +331,12 @@ export function CreativeWorkflowWorkspace({
     const agentModel = agentTextModel || effectiveConfig.textModel || "";
     const agentChannelId = agentTextChannelId || effectiveConfig.textChannelId;
     const agentModelInfo = useMemo(() => describeModelSelection(effectiveConfig, agentModel, agentChannelId), [agentChannelId, agentModel, effectiveConfig]);
+    const runConfig = runningWorkflow ? buildRunConfig(effectiveConfig, runningWorkflow.config, resolveWorkflowRuntime(runningWorkflow, effectiveConfig)) : effectiveConfig;
+    const imagePlan = runningWorkflow ? buildWorkflowImagePlan(runningWorkflow, runConfig, renderedPrompt, workflowReferences, seriesDrafts) : [];
+    const promptModel = runningWorkflow?.seriesConfig.promptModel || effectiveConfig.textModel || effectiveConfig.model;
+    const promptChannelId = runningWorkflow?.seriesConfig.promptChannelId || effectiveConfig.textChannelId;
+    const promptConfig = { ...effectiveConfig, model: promptModel, textModel: promptModel, textChannelId: promptChannelId, activeChannelId: promptChannelId, systemPrompt: effectiveConfig.systemPrompts.workflow || effectiveConfig.systemPrompt };
+    const promptDescriptor = runningWorkflow ? buildWorkflowTextQuote(promptConfig, buildSeriesPromptDraftRequest(runningWorkflow, renderedPrompt, Math.max(1, Math.min(20, Number(runningWorkflow.seriesConfig.targetCount) || Number(runningWorkflow.config.count) || 4)), inputValues)) : null;
 
     useEffect(() => {
         if (!isUserReady) return;
@@ -1183,6 +1218,7 @@ export function CreativeWorkflowWorkspace({
                                 </div>
                             ) : null}
                         </div>
+                        <WorkflowDraftCredits token={token} active={agentOpen} prompt={agentPrompt} model={agentTextModel || effectiveConfig.textModel || effectiveConfig.model} channelMode={effectiveConfig.channelMode} channelId={agentTextChannelId || effectiveConfig.textChannelId} />
                         <Button block type="primary" loading={agentLoading} icon={<Sparkles className="size-4" />} onClick={() => void runWorkflowAgent()}>
                             生成工作流草稿
                         </Button>
@@ -1278,6 +1314,11 @@ export function CreativeWorkflowWorkspace({
                                     <div className="mt-3 rounded-md border border-dashed border-stone-300 py-5 text-center text-xs text-stone-500 dark:border-stone-800">未添加参考图</div>
                                 )}
                             </div>
+                            {runningWorkflow.mode === "multi_image_series" ? (
+                                <div className="space-y-1 text-xs"><EstimatedCredits className="font-semibold" config={promptConfig} descriptor={promptDescriptor} /><div>文本规划按实际用量结算；输出 token 尚未产生，不预估整工作流总额。</div></div>
+                            ) : (
+                                <WorkflowPlanCredits key={JSON.stringify([token, quoteUserId, runConfig.channelMode, runConfig.activeChannelId, imagePlan])} config={runConfig} plan={imagePlan} />
+                            )}
                             <Button block type="primary" size="large" loading={seriesDraftLoading} icon={runningWorkflow.mode === "multi_image_series" ? <Layers3 className="size-4" /> : <Play className="size-4" />} onClick={() => void runWorkflow()}>
                                 {runningWorkflow.mode === "multi_image_series" ? "生成提示词" : "启动任务"}
                             </Button>
@@ -1315,6 +1356,10 @@ export function CreativeWorkflowWorkspace({
                                             </Button>
                                         </div>
                                     </div>
+                                    <div className="mb-3 space-y-2">
+                                        <div className="text-xs">重新生成提示词 · <EstimatedCredits config={promptConfig} descriptor={promptDescriptor} /></div>
+                                        <WorkflowPlanCredits key={JSON.stringify([token, quoteUserId, runConfig.channelMode, runConfig.activeChannelId, imagePlan])} config={runConfig} plan={imagePlan} />
+                                    </div>
                                     {seriesDrafts.length ? (
                                         <>
                                             <div className="mb-3 flex gap-2">
@@ -1326,6 +1371,8 @@ export function CreativeWorkflowWorkspace({
                                                     <SeriesPromptDraftCard
                                                         key={draft.id}
                                                         draft={draft}
+                                                        quoteConfig={runConfig}
+                                                        references={workflowReferences}
                                                         index={index}
                                                         isFirst={index === 0}
                                                         isLast={index === seriesDrafts.length - 1}
@@ -1352,6 +1399,41 @@ export function CreativeWorkflowWorkspace({
             <AssetPickerModal open={workflowAssetPickerOpen} defaultTab="my-assets" onInsert={insertWorkflowAsset} onClose={() => setWorkflowAssetPickerOpen(false)} />
         </main>
     );
+}
+
+function buildWorkflowTextQuote(config: AiConfig, prompt: string): QuoteDescriptor {
+    const systemPrompt = (config.systemPrompts.text || config.systemPrompt).trim();
+    return { endpoint: "/v1/chat/completions", body: { model: config.model, messages: [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), { role: "user", content: prompt }], stream: true }, batch_count: 1, missing_fields: [...(!config.model ? ["model"] : []), ...(!prompt.trim() ? ["prompt"] : [])] };
+}
+
+function buildWorkflowImagePlan(workflow: CreativeWorkflow, config: AiConfig, prompt: string, references: ReferenceImage[], drafts: SeriesPromptDraft[]) {
+    const prompts = workflow.mode === "multi_image_series"
+        ? drafts.filter(item => item.status !== "success" && item.status !== "running" && item.prompt.trim()).map(item => item.prompt.trim())
+        : Array.from({ length: Math.max(1, Math.min(10, Number(config.count) || 1)) }, () => prompt);
+    return prompts.map(prompt => buildQuoteDescriptor({ config: { ...config, count: "1" }, mode: "image", prompt, references: { references }, batchCount: 1, batchMode: "separate" }));
+}
+
+function workflowPlanTotal(quotes: Array<RequestQuote | undefined>): number | null {
+    if (!quotes.length || quotes.some(quote => quote?.status !== "estimated" || typeof quote.points_cost !== "number" || !Number.isFinite(quote.points_cost) || quote.points_cost < 0)) return null;
+    const total = quotes.reduce((sum, quote) => sum + quote!.points_cost!, 0);
+    return Number.isFinite(total) ? total : null;
+}
+
+function WorkflowQuoteItem({ config, descriptor, index, onQuote }: { config: AiConfig; descriptor: QuoteDescriptor; index: number; onQuote: (index: number, quote?: RequestQuote) => void }) {
+    const { quote, label, detail } = useRequestQuote(config, descriptor);
+    useEffect(() => { onQuote(index, quote); }, [index, quote, onQuote]);
+    return <div className="text-xs" title={detail}>第 {index + 1} 项：{label}</div>;
+}
+
+function WorkflowPlanCredits({ config, plan }: { config: AiConfig; plan: QuoteDescriptor[] }) {
+    const [quotes, setQuotes] = useState<Record<number, RequestQuote | undefined>>({});
+    const report = useMemo(() => (index: number, quote?: RequestQuote) => setQuotes(current => current[index] === quote ? current : { ...current, [index]: quote }), []);
+    const total = workflowPlanTotal(plan.map((_, index) => quotes[index]));
+    return <div className="space-y-1 text-sm font-medium" aria-live="polite">
+        <div>{!plan.length ? "尚无可执行图片计划，预计总积分未知" : total === null ? `当前 ${plan.length} 项图片计划：预计总积分未知（含未确定项）` : `当前 ${plan.length} 项图片计划：预计消耗 ${total} 积分`}</div>
+        <div className="text-xs font-normal">仅包含本次图片计划，文本规划按实际用量另计。</div>
+        <details className="font-normal"><summary className="cursor-pointer text-xs">逐项预计积分</summary>{plan.map((descriptor, index) => <WorkflowQuoteItem key={index} config={config} descriptor={descriptor} index={index} onQuote={report} />)}</details>
+    </div>;
 }
 
 function WorkflowCard({ workflow, onRun, onEdit, onCopy, onDelete }: { workflow: CreativeWorkflow; onRun: () => void; onEdit: () => void; onCopy: () => void; onDelete: () => void }) {
@@ -1470,6 +1552,8 @@ function WorkflowTaskCard({ task, now, onCopyPrompt, onDownload }: { task: Workf
 
 function SeriesPromptDraftCard({
     draft,
+    quoteConfig,
+    references,
     index,
     isFirst,
     isLast,
@@ -1481,6 +1565,8 @@ function SeriesPromptDraftCard({
     onDelete,
 }: {
     draft: SeriesPromptDraft;
+    quoteConfig: AiConfig;
+    references: ReferenceImage[];
     index: number;
     isFirst: boolean;
     isLast: boolean;
@@ -1513,6 +1599,7 @@ function SeriesPromptDraftCard({
                 </div>
             </div>
             <Input.TextArea value={draft.prompt} autoSize={{ minRows: 3, maxRows: 7 }} onChange={(event) => onChange({ prompt: event.target.value, status: draft.status === "success" ? "draft" : draft.status })} />
+            <div className="mt-2"><EstimatedCredits className="font-semibold" config={quoteConfig} descriptor={buildQuoteDescriptor({ config: { ...quoteConfig, count: "1" }, mode: "image", prompt: draft.prompt.trim(), references: { references }, batchCount: 1, batchMode: "separate" })} /></div>
             {draft.error ? <div className="mt-2 rounded-md bg-red-100 px-2.5 py-1.5 text-xs text-red-600 dark:bg-red-950/40 dark:text-red-300">{draft.error}</div> : null}
         </article>
     );

@@ -86,6 +86,7 @@ export function CanvasAssistantComposer({
                     placeholder="描述创作目标，或让我继续操作画布"
                     placeholderClassName="!left-1 !top-0"
                 />
+                <p className="mt-2 text-[11px] leading-4" style={{ color: theme.node.muted }}>Agent 对话按实际用量结算积分；自动创作包含的媒体任务另计，预计积分见各生成节点，不能将单个模型价格当作整场创作总额。</p>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-y-2 gap-x-1.5 pt-1">
                     <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
                         <Dropdown

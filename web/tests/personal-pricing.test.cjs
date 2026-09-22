@@ -90,7 +90,7 @@ test('pricing details keep discount zero, final group rate, units and expression
     const text = api.personalPricingDetails(model(0, { discount: { factor: 0, source: 'user' }, billing_mode: 'tiered_expr', billing_expr: 'duration * 0.3' }));
     assert.match(text, /本人优惠倍率 0/);
     assert.match(text, /最终倍率 0.5/);
-    assert.match(text, /基价 2 USD\/次/);
+    assert.doesNotMatch(text, /基价 2/); // A USD diagnostic field must not be labelled with the points unit.
     assert.match(text, /duration \* 0.3/);
 });
 
@@ -99,10 +99,10 @@ test('credit display never applies video multipliers or guesses credits for pers
     let pricing = model(0, { billing_mode: 'tiered_expr', billing_expr: 'duration * 0.3', formatted_points_cost: '按实际用量结算' });
     const credits = load('../src/constant/credits.tsx', { '@/services/api/pricing': { getModelPricing: () => pricing } });
     const options = { model: 'image', mode: 'video', seconds: 10, resolution: '1080p' };
-    assert.equal(credits.formatModelCostTag(options), '按实际用量结算');
+    assert.equal(credits.formatModelCostTag(options), '按实际用量结算积分');
     assert.equal(credits.requestCreditCost(options), 0);
     pricing = model(0);
-    assert.equal(credits.formatModelCostTag(options), '0 USD/次 · 按平台账单结算');
+    assert.equal(credits.formatModelCostTag(options), '积分报价暂不可用');
     assert.equal(credits.requestCreditCost(options), 0);
     pricing = undefined;
     assert.equal(credits.formatModelCostTag(options), '本人报价暂不可用');

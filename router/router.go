@@ -49,6 +49,10 @@ func New() *gin.Engine {
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
 		aicc.Handle(method, "/*path", gin.WrapF(handler.AICCProxy))
 	}
+	api.POST("/v1/model-pricing/quote", func(c *gin.Context) {
+		c.Header("Cache-Control", "private, no-store")
+		c.Next()
+	}, middleware.UserAuth, gin.WrapF(handler.RequestQuote))
 	v1 := api.Group("/v1", middleware.UserAuth)
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
@@ -86,6 +90,7 @@ func New() *gin.Engine {
 	v1.GET("/workflows", gin.WrapF(handler.UserWorkflows))
 	v1.POST("/workflows", gin.WrapF(handler.SaveUserWorkflow))
 	v1.POST("/workflows/agent-draft", gin.WrapF(handler.DraftUserWorkflow))
+	v1.POST("/workflows/agent-draft/quote", gin.WrapF(handler.QuoteUserWorkflowDraft))
 	v1.DELETE("/workflows/:id", func(c *gin.Context) {
 		handler.DeleteUserWorkflow(c.Writer, c.Request, c.Param("id"))
 	})

@@ -8,7 +8,8 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
-import { CreditSymbol, formatModelCostTag } from "@/constant/credits";
+import { EstimatedCredits, type EstimatedCreditsProps } from "@/components/estimated-credits";
+import { buildQuoteDescriptor } from "@/services/api/quote-descriptor";
 import { usePersonalPricing } from "@/services/api/pricing";
 import { AssetPickerModal, type AssetPickerTab, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
@@ -166,6 +167,8 @@ export default function VideoPage() {
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const aiccSelectionEnabled = isSeedanceVideoConfig({ ...videoConfig, model });
     const canGenerate = Boolean(prompt.trim());
+    const quoteSnapshot = buildVideoSubmissionSnapshot({ config: { ...videoConfig, videoNegativePrompt: (videoConfig.videoNegativePrompt ?? negativePrompt).trim() }, model, prompt, references, firstFrame, lastFrame, videoReferences, audioReferences, taskCount });
+    const generationQuote: EstimatedCreditsProps = { config: quoteSnapshot.config, descriptor: buildQuoteDescriptor({ config: quoteSnapshot.config, mode: "video", prompt: quoteSnapshot.text, references: quoteSnapshot, batchCount: quoteSnapshot.taskCount, batchMode: "separate" }) };
     const pendingCount = results.filter((item) => item.status === "pending").length;
     const klingWorkbench = resolveKlingWorkbenchConfig(videoConfig, model);
     const klingWorkbenchVariant = klingWorkbench?.variant || "";
@@ -602,7 +605,6 @@ export default function VideoPage() {
         const klingV3 = isKlingV3Config(configValue, modelValue);
         const kling = klingV26 || klingV3;
         const omni = kieKlingOmniVariant(configValue, modelValue);
-        const acceptsVideoReferences = omni === "reference-to-video" || omni === "transformation";
         const supportsElements = omni !== "transformation";
         if (!text) {
             message.error("请输入视频提示词");
@@ -653,11 +655,7 @@ export default function VideoPage() {
                 return null;
             }
         }
-        const frameReferencesEnabled = !kling && supportsVideoFrameReferences(modelValue, channelProtocolForConfig({ ...configValue, model: modelValue }));
-        let normalizedConfig = buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue);
-        if (omni === "reference-to-video" && videoReferenceItems.length) normalizedConfig.videoGenerateAudio = "false";
-        const imageReferences = omni === "text-to-video" ? [] : omni === "reference-to-video" ? [...referenceItems] : [...referenceItems].slice(0, kling ? omni === "transformation" ? 4 : 2 : referenceItems.length);
-        return { text, model: modelValue, config: normalizedConfig, references: imageReferences, firstFrame: frameReferencesEnabled ? firstFrameItem : null, lastFrame: frameReferencesEnabled ? lastFrameItem : null, videoReferences: acceptsVideoReferences ? [...videoReferenceItems].slice(0, 1) : kling ? [] : [...videoReferenceItems], audioReferences: kling ? [] : [...audioReferenceItems], taskCount: normalizeVideoCount(taskCountValue) };
+        return buildVideoSubmissionSnapshot({ config: { ...configValue, videoNegativePrompt: currentNegativePrompt }, model: modelValue, prompt: text, references: referenceItems, firstFrame: firstFrameItem, lastFrame: lastFrameItem, videoReferences: videoReferenceItems, audioReferences: audioReferenceItems, taskCount: taskCountValue });
     };
 
     const submitGenerationSnapshot = async (snapshot: { text: string; model: string; config: AiConfig; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number }) => {
@@ -1094,6 +1092,7 @@ export default function VideoPage() {
                         <Button className="shrink-0" icon={<FolderPlus className="size-4" />} onClick={() => openAssetPicker("general", "aicc")}>人物素材与认证</Button>
                         {isKlingWorkbench ? (
                             <KlingV26WorkbenchPanel
+                                generationQuote={generationQuote}
                                 isKlingV3={klingWorkbenchVariant === "v3"}
                                 klingProvider={klingWorkbenchProvider}
                                 klingOmniVariant={klingOmni}
@@ -1139,6 +1138,7 @@ export default function VideoPage() {
                             />
                         ) : (
                         <WorkbenchPanel
+                            generationQuote={generationQuote}
                             layout="side"
                             currentLayout={workbenchLayout}
                             prompt={prompt}
@@ -1234,6 +1234,7 @@ export default function VideoPage() {
                             syncingVideoIds={syncingVideoIds}
                         />
                         <WorkbenchPanel
+                            generationQuote={generationQuote}
                             layout="bottom"
                             currentLayout={workbenchLayout}
                             prompt={prompt}
@@ -1331,6 +1332,7 @@ export default function VideoPage() {
 }
 
 function WorkbenchPanel({
+    generationQuote,
     layout,
     currentLayout,
     prompt,
@@ -1373,6 +1375,7 @@ function WorkbenchPanel({
     bottomSettingsCollapsed = true,
     setBottomSettingsCollapsed,
 }: {
+    generationQuote: EstimatedCreditsProps;
     layout: WorkbenchLayout;
     currentLayout: WorkbenchLayout;
     prompt: string;
@@ -1459,11 +1462,11 @@ function WorkbenchPanel({
                                 <Button size="small" onClick={() => onOpenAssetPicker("general", "aicc")}>人物素材与认证</Button>
                                 <Button title="参数配置" className={`lg:hidden ${!bottomSettingsCollapsed ? "!border-sky-500/30 !bg-sky-500/10 !text-sky-500" : ""}`} icon={<SlidersHorizontal className="size-4" />} onClick={() => setBottomSettingsCollapsed?.(!bottomSettingsCollapsed)} />
                                 <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
-                                <Button type="primary" className="h-9 rounded-xl px-3 font-medium lg:!hidden" disabled={!canGenerate} onClick={onGenerate}>
-                                    <span className="flex items-center gap-1 text-xs">
+                                <Button type="primary" className="!h-auto !min-h-9 !max-w-full !whitespace-normal !py-1.5 rounded-xl px-3 font-medium lg:!hidden" disabled={!canGenerate} onClick={onGenerate}>
+                                    <span className="flex min-w-0 flex-wrap items-center justify-center gap-1 text-xs">
                                         <Sparkles className="size-3.5" />
                                         <span>{pendingCount ? `${pendingCount} 生成中` : "生成"}</span>
-                                        <span>({formatModelCostTag({ model, mode: "video", seconds: config.videoSeconds, resolution: config.vquality || config.size, count: taskCount })})</span>
+                                        <EstimatedCredits {...generationQuote} />
                                     </span>
                                 </Button>
                             </div>
@@ -1495,14 +1498,11 @@ function WorkbenchPanel({
                             )}
                             <QuickNumber label="任务" value={String(taskCount)} min={1} max={6} onChange={(value) => onTaskCountChange(normalizeVideoCount(value))} />
                             <ReferenceQuickActions imageCount={references.length} videoCount={videoReferences.length} audioCount={audioReferences.length} onPasteReferences={onPasteReferences} onUploadReferences={onUploadReferences} />
-                            <Button type="primary" className="hidden h-11 min-w-32 items-center justify-center gap-2 rounded-xl lg:flex font-semibold shadow-sm" disabled={!canGenerate} onClick={onGenerate}>
-                                <span className="flex items-center gap-1.5">
-                                    <Sparkles className="size-4" />
+                            <Button type="primary" className="hidden !h-auto !min-h-11 min-w-0 !whitespace-normal !py-2 items-center justify-center gap-2 rounded-xl lg:flex font-semibold shadow-sm" disabled={!canGenerate} onClick={onGenerate}>
+                                <span className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
+                                    <Sparkles className="size-4 shrink-0" />
                                     <span>{pendingCount ? `${pendingCount} 生成中` : "开始创作"}</span>
-                                    <span className="inline-flex items-center gap-1 rounded bg-black/15 px-2 py-0.5 text-xs font-mono font-medium dark:bg-white/15">
-                                        <CreditSymbol />
-                                        <span>{formatModelCostTag({ model, mode: "video", seconds: config.videoSeconds, resolution: config.vquality || config.size, count: taskCount })}</span>
-                                    </span>
+                                    <EstimatedCredits {...generationQuote} className="rounded bg-black/15 px-2 py-0.5 dark:bg-white/15" />
                                 </span>
                             </Button>
                         </div>
@@ -1579,14 +1579,11 @@ function WorkbenchPanel({
                 </WorkbenchSection>
             </div>
             <div className="shrink-0 border-t border-stone-200 p-4 dark:border-stone-800">
-                <Button type="primary" size="large" block disabled={!canGenerate} onClick={onGenerate} className="!h-11 !rounded-xl font-semibold shadow-sm">
-                    <span className="flex items-center justify-center gap-2">
-                        <Sparkles className="size-4" />
+                <Button type="primary" size="large" block disabled={!canGenerate} onClick={onGenerate} className="!h-auto !min-h-11 !whitespace-normal !py-2 !rounded-xl font-semibold shadow-sm">
+                    <span className="flex min-w-0 flex-wrap items-center justify-center gap-2">
+                        <Sparkles className="size-4 shrink-0" />
                         <span>{pendingCount ? `生成中（${pendingCount}）` : "开始生成"}</span>
-                        <span className="inline-flex items-center gap-1 rounded bg-black/15 px-2 py-0.5 text-xs font-mono font-medium dark:bg-white/15">
-                            <CreditSymbol />
-                            <span>{formatModelCostTag({ model, mode: "video", seconds: config.videoSeconds, resolution: config.vquality || config.size, count: taskCount })}</span>
-                        </span>
+                        <EstimatedCredits {...generationQuote} className="rounded bg-black/15 px-2 py-0.5 dark:bg-white/15" />
                     </span>
                 </Button>
             </div>
@@ -2828,6 +2825,23 @@ function buildLog({ prompt, model, config, references, firstFrame, lastFrame, vi
         error,
         errorDetail,
         lastPolledAt,
+    };
+}
+
+// Shared by submission and pricing so both use the same model, normalized settings and selected media.
+function buildVideoSubmissionSnapshot({ config, model, prompt, references, firstFrame, lastFrame, videoReferences, audioReferences, taskCount }: { config: AiConfig; model: string; prompt: string; references: ReferenceImage[]; firstFrame?: ReferenceImage | null; lastFrame?: ReferenceImage | null; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; taskCount: number }) {
+    const kling = isAPIMartKlingV26Config(config, model) || isKlingV3Config(config, model);
+    const omni = kieKlingOmniVariant(config, model);
+    const acceptsVideoReferences = omni === "reference-to-video" || omni === "transformation";
+    const frames = !kling && supportsVideoFrameReferences(model, channelProtocolForConfig({ ...config, model }));
+    const normalizedConfig = buildVideoConfig(config, model);
+    if (omni === "reference-to-video" && videoReferences.length) normalizedConfig.videoGenerateAudio = "false";
+    return {
+        text: prompt.trim(), model, config: normalizedConfig,
+        references: omni === "text-to-video" ? [] : omni === "reference-to-video" ? [...references] : [...references].slice(0, kling ? omni === "transformation" ? 4 : 2 : references.length),
+        firstFrame: frames ? firstFrame : null, lastFrame: frames ? lastFrame : null,
+        videoReferences: acceptsVideoReferences ? [...videoReferences].slice(0, 1) : kling ? [] : [...videoReferences],
+        audioReferences: kling ? [] : [...audioReferences], taskCount: normalizeVideoCount(taskCount),
     };
 }
 
