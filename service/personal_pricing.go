@@ -87,7 +87,10 @@ func personalPricingJSON(ctx context.Context, client *http.Client, base, path, t
 		return errors.New("本人报价请求构建失败")
 	}
 	if token != "" {
-		if !strings.HasPrefix(token, "sk-") {
+		if path == "/api/user/quota-by-token" {
+			// This legacy wallet endpoint looks up the raw database key directly.
+			token = strings.TrimPrefix(token, "sk-")
+		} else if !strings.HasPrefix(token, "sk-") {
 			token = "sk-" + token
 		}
 		req.Header.Set("Authorization", "Bearer "+token)

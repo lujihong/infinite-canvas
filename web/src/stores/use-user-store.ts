@@ -37,7 +37,6 @@ export const useUserStore = create<UserStore>()(
                     import("@/app/(user)/canvas/stores/use-canvas-store").then(({ useCanvasStore }) => useCanvasStore.getState().reset()).catch(() => {});
                     import("@/stores/use-asset-store").then(({ useAssetStore }) => useAssetStore.getState().reset()).catch(() => {});
                     import("@/stores/use-config-store").then(({ useConfigStore }) => useConfigStore.getState().loadUserConfig(user.id)).catch(() => {});
-                    import("@/stores/use-wallet-store").then(({ useWalletStore }) => useWalletStore.setState({ wallet: null })).catch(() => {});
                     import("@/stores/use-editor-store").then(({ useEditorStore }) => useEditorStore.getState().loadUserProject(user.id)).catch(() => {});
                     import("@/components/layout/app-providers").then(({ appQueryClient }) => appQueryClient.clear()).catch(() => {});
                 } else if (!prevUser) {
@@ -51,7 +50,6 @@ export const useUserStore = create<UserStore>()(
                 import("@/app/(user)/canvas/stores/use-canvas-store").then(({ useCanvasStore }) => useCanvasStore.getState().reset()).catch(() => {});
                 import("@/stores/use-asset-store").then(({ useAssetStore }) => useAssetStore.getState().reset()).catch(() => {});
                 import("@/stores/use-config-store").then(({ useConfigStore }) => useConfigStore.getState().reset()).catch(() => {});
-                import("@/stores/use-wallet-store").then(({ useWalletStore }) => useWalletStore.setState({ wallet: null })).catch(() => {});
                 import("@/stores/use-editor-store").then(({ useEditorStore }) => useEditorStore.getState().clearProject()).catch(() => {});
                 import("@/services/image-storage").then(({ clearGuestStorageProviders }) => clearGuestStorageProviders()).catch(() => {});
                 import("@/components/layout/app-providers").then(({ appQueryClient }) => appQueryClient.clear()).catch(() => {});

@@ -19,7 +19,7 @@ export function quoteLabel(quote?: RequestQuote): string {
     if (!quote) return "预计积分暂不可用";
     if (quote.status === "estimated" && typeof quote.points_cost === "number" && Number.isFinite(quote.points_cost) && quote.points_cost >= 0) {
         // Keep tiny positive quotes positive; display rounding must never imply free usage.
-        return `预计消耗 ${String(quote.points_cost)} 积分`;
+        return `预计消耗 ${Number(quote.points_cost.toPrecision(12))} 积分`;
     }
     return quote.status === "usage_required" ? "按实际用量结算积分" : "预计积分暂不可用";
 }
@@ -30,14 +30,20 @@ export function quoteDetails(quote?: RequestQuote): string {
     return [quote?.message, ...rates, quote?.missing_fields?.length ? `待确定：${quote.missing_fields.join("、")}` : "", "预计积分依当前参数及本人价格计算；实际返回用量和重试路由可能影响最终结算。"].filter(Boolean).join("\n");
 }
 
+// Mirrors usesAccountProxy in image.ts (also text/canvas-agent), video.ts and audio.ts.
+// Their provider-specific browser senders are only used outside these account-proxy branches.
+export function requestUsesSiteBackend(config: Pick<AiConfig, "channelMode">, token: string): boolean {
+    return config.channelMode === "remote" || (config.channelMode === "local" && Boolean(token));
+}
+
 // No persistent/global quote cache: cancellation and identity checks protect parameter changes.
 export function useRequestQuote(config: AiConfig, descriptor: QuoteDescriptor | null) {
     const token = useUserStore(state => state.token);
     const userID = useUserStore(state => state.user?.id);
     const channel = channelIdForActiveModel(config);
-    const official = channel === "xyb-official-exclusive" || (config.channelMode === "remote" && !channel);
+    const siteBackend = requestUsesSiteBackend(config, token);
     const missing = descriptor?.missing_fields || [];
-    const blocked = !official ? "当前渠道不使用本站积分账本，无法提供本人中转站报价" : !token || !userID ? "请先登录后查看本人预计积分" : !descriptor ? "请配置模型和生成参数" : missing.length ? `报价缺少：${missing.join("、")}` : "";
+    const blocked = !siteBackend ? "浏览器直连供应商，不使用本站积分报价" : !token || !userID ? "请先登录后查看本人预计积分" : !descriptor ? "请配置模型和生成参数" : missing.length ? `报价缺少：${missing.join("、")}` : "";
     const key = JSON.stringify({ descriptor, channel, mode: config.channelMode });
     const [state, setState] = useState<{ key: string; token: string; userID: unknown; quote?: RequestQuote; loading: boolean; error?: string }>({ key: "", token: "", userID: undefined, loading: false });
     useEffect(() => {
@@ -69,5 +75,5 @@ export function useRequestQuote(config: AiConfig, descriptor: QuoteDescriptor | 
         return () => { active = false; clearTimeout(timer); clearTimeout(deadline); controller.abort(); };
     }, [key, token, userID, blocked]);
     const current = state.key === key && state.token === token && state.userID === userID ? state : undefined;
-    return { quote: blocked ? undefined : current?.quote, label: !blocked && (!current || current.loading) ? "预计积分计算中…" : quoteLabel(current?.quote), detail: blocked || current?.error || quoteDetails(current?.quote) };
+    return { quote: blocked ? undefined : current?.quote, label: !blocked && (!current || current.loading) ? "预计积分计算中…" : quoteLabel(blocked ? undefined : current?.quote), detail: blocked || current?.error || quoteDetails(current?.quote) };
 }

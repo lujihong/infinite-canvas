@@ -4,11 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { App, Button, Modal, QRCode, Skeleton } from "antd";
 import { CheckCircle2, CreditCard, Loader2, Receipt, Sparkles, Wallet, Zap } from "lucide-react";
 
-import { checkRechargeStatus, createRechargeOrder, fetchUserWallet, type RechargeOrderResult, type UserWalletInfo } from "@/services/api/auth";
+import { checkRechargeStatus, createRechargeOrder, type RechargeOrderResult } from "@/services/api/auth";
 import { useUserStore } from "@/stores/use-user-store";
-
-// 默认中转站标准汇率兜底：1 元人民币 = 10 积分（优先从中转站接口实时读取动态汇率）
-const DEFAULT_EXCHANGE_RATE = 10;
+import { useWalletStore } from "@/stores/use-wallet-store";
+import { formatPoints } from "@/lib/points";
 
 const PRESET_AMOUNTS = [
     { value: 10, label: "¥10", desc: "日常尝鲜" },
@@ -34,8 +33,9 @@ export function RechargeModal({
     const token = useUserStore((state) => state.token);
     const user = useUserStore((state) => state.user);
 
-    const [wallet, setWallet] = useState<UserWalletInfo | null>(null);
-    const [loadingWallet, setLoadingWallet] = useState(false);
+    const wallet = useWalletStore((state) => state.wallet);
+    const loadingWallet = useWalletStore((state) => state.isLoading);
+    const loadWallet = useWalletStore((state) => state.fetchWallet);
 
     const [selectedAmount, setSelectedAmount] = useState<number>(50);
     const [customAmount, setCustomAmount] = useState<string>("50");
@@ -46,40 +46,32 @@ export function RechargeModal({
     const [isPaid, setIsPaid] = useState(false);
 
     const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-    // 动态获取中转站配置的汇率（默认 7）
-    const exchangeRate = wallet?.exchangeRate && wallet.exchangeRate > 0 ? wallet.exchangeRate : DEFAULT_EXCHANGE_RATE;
-
-    // 计算当前选定金额对应积分（动态依据中转站汇率折算）
-    const currentAmountNum = Math.max(1, parseInt(customAmount, 10) || selectedAmount || 1);
-    const currentPoints = Math.round(currentAmountNum * exchangeRate * 100) / 100;
-
-    // 加载用户当前钱包余额
-    const loadWallet = async () => {
-        if (!token) return;
-        setLoadingWallet(true);
-        try {
-            const data = await fetchUserWallet(token);
-            setWallet(data);
-        } catch {
-            // ignore
-        } finally {
-            setLoadingWallet(false);
-        }
+    const paymentVersion = useRef(0);
+    const stopPayment = () => {
+        paymentVersion.current++;
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
     };
 
+    useEffect(() => useUserStore.subscribe((current, previous) => {
+        if (current.token !== previous.token || current.user?.id !== previous.user?.id) stopPayment();
+    }), []);
+
+    // Only verified recharge conversion data may promise credited points.
+    const exchangeRate = typeof wallet?.exchangeRate === "number" && Number.isFinite(wallet.exchangeRate) && wallet.exchangeRate > 0 ? wallet.exchangeRate : null;
+    const rechargePoints = (amount: number) => exchangeRate === null ? null : amount * exchangeRate;
+    const exchangeRateLabel = exchangeRate === null ? "充值积分暂不可用" : `1元 = ${exchangeRate}积分`;
+    const currentAmountNum = Math.max(1, parseInt(customAmount, 10) || selectedAmount || 1);
+    const currentPoints = rechargePoints(currentAmountNum);
+
     useEffect(() => {
-        if (open) {
-            loadWallet();
-            setActiveOrder(null);
-            setIsPaid(false);
-        } else {
-            if (pollTimerRef.current) {
-                clearInterval(pollTimerRef.current);
-                pollTimerRef.current = null;
-            }
-        }
-    }, [open, token]);
+        stopPayment();
+        setActiveOrder(null);
+        setIsPaid(false);
+        setCreatingOrder(false);
+        if (open) void loadWallet();
+        return stopPayment;
+    }, [open, token, user?.id, loadWallet]);
 
     // 选择预设金额
     const handleSelectPreset = (amount: number) => {
@@ -109,22 +101,29 @@ export function RechargeModal({
             return;
         }
 
+        if (!open || !token || !user) return;
+        stopPayment();
+        const version = paymentVersion.current;
+        const isCurrent = () => {
+            const current = useUserStore.getState();
+            return version === paymentVersion.current && current.token === token && current.user?.id === user.id;
+        };
         setCreatingOrder(true);
         try {
             const order = await createRechargeOrder(amount, token);
+            if (!isCurrent()) return;
             setActiveOrder(order);
             setIsPaid(false);
 
             // 启动轮询检查支付状态
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             pollTimerRef.current = setInterval(async () => {
+                if (!isCurrent()) return;
                 try {
                     const status = await checkRechargeStatus(order.trade_no, token);
+                    if (!isCurrent()) return;
                     if (status.paid) {
-                        if (pollTimerRef.current) {
-                            clearInterval(pollTimerRef.current);
-                            pollTimerRef.current = null;
-                        }
+                        stopPayment();
                         setIsPaid(true);
                         message.success("支付成功！算力积分已实时到账");
                         loadWallet();
@@ -135,9 +134,9 @@ export function RechargeModal({
                 }
             }, 1500);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "创建充值订单失败");
+            if (isCurrent()) message.error(error instanceof Error ? error.message : "创建充值订单失败");
         } finally {
-            setCreatingOrder(false);
+            if (isCurrent()) setCreatingOrder(false);
         }
     };
 
@@ -170,7 +169,7 @@ export function RechargeModal({
                                     算力充值中心
                                 </h2>
                                 <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
-                                    官方直连通道 · 实时汇率 1元 = {exchangeRate}积分
+                                    官方直连通道 · {exchangeRateLabel}
                                 </p>
                             </div>
                         </div>
@@ -204,10 +203,7 @@ export function RechargeModal({
                         ) : (
                             <>
                                 <span className="font-mono text-lg font-extrabold tracking-tight text-amber-600 dark:text-amber-400">
-                                    {wallet?.formattedPoints || (wallet ? `${(wallet.balanceYuan * exchangeRate).toFixed(1)} 积分` : "0.0 积分")}
-                                </span>
-                                <span className="text-[11px] text-stone-400">
-                                    ({wallet?.formattedBalance || "¥0.00"})
+                                    {formatPoints(wallet?.points)}
                                 </span>
                             </>
                         )}
@@ -222,13 +218,13 @@ export function RechargeModal({
                             <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">
                                 <span>快捷面额选择</span>
                                 <span className="text-[11px] font-normal text-amber-600 dark:text-amber-400 font-medium">
-                                    1元 = {exchangeRate}积分
+                                    {exchangeRateLabel}
                                 </span>
                             </div>
                             <div className="grid grid-cols-3 gap-2">
                                 {PRESET_AMOUNTS.map((item) => {
                                     const isSelected = !isCustom && selectedAmount === item.value;
-                                    const itemPoints = Math.round(item.value * exchangeRate);
+                                    const itemPoints = rechargePoints(item.value);
                                     return (
                                         <button
                                             key={item.value}
@@ -249,7 +245,7 @@ export function RechargeModal({
                                                 {item.label}
                                             </span>
                                             <span className="mt-0.5 font-mono text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                                                +{itemPoints} 积分
+                                                {formatPoints(itemPoints, "+")}
                                             </span>
                                             <span className="text-[10px] text-stone-400 dark:text-stone-500">
                                                 {item.desc}
@@ -278,7 +274,7 @@ export function RechargeModal({
                                     className="h-10 w-full rounded-xl border border-stone-200/80 bg-white pl-7 pr-24 font-mono text-base font-bold text-stone-900 transition-colors focus:border-sky-500 focus:outline-none dark:border-stone-800 dark:bg-stone-900 dark:text-stone-100"
                                 />
                                 <div className="absolute right-3 text-xs font-semibold text-amber-600 dark:text-amber-400 pointer-events-none">
-                                    +{currentPoints.toLocaleString()} 积分
+                                    {formatPoints(currentPoints, "+")}
                                 </div>
                             </div>
                         </div>
@@ -327,7 +323,7 @@ export function RechargeModal({
                                 onClick={handleStartPay}
                                 className="!h-11 !rounded-xl !text-sm !font-bold"
                             >
-                                立即充值 · 支付 ¥{currentAmountNum} 获得 {currentPoints.toLocaleString()} 积分
+                                立即充值 · 支付 ¥{currentAmountNum} · {formatPoints(currentPoints)}
                             </Button>
                         </div>
                     </div>
@@ -357,7 +353,7 @@ export function RechargeModal({
                                             ¥{activeOrder.amount}.00
                                         </span>
                                         <span className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
-                                            (到账 {Math.round(activeOrder.amount * exchangeRate).toLocaleString()} 积分)
+                                            (到账 {formatPoints(rechargePoints(activeOrder.amount))})
                                         </span>
                                     </div>
                                 </div>
@@ -371,7 +367,7 @@ export function RechargeModal({
                                     <Button
                                         block
                                         onClick={() => {
-                                            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+                                            stopPayment();
                                             setActiveOrder(null);
                                         }}
                                     >
@@ -381,13 +377,25 @@ export function RechargeModal({
                                         block
                                         type="primary"
                                         onClick={async () => {
-                                            const status = await checkRechargeStatus(activeOrder.trade_no, token);
-                                            if (status.paid) {
-                                                setIsPaid(true);
-                                                message.success("支付成功！");
-                                                loadWallet();
-                                            } else {
-                                                message.info("暂未查询到微信到账，若已付款请等待数秒后刷新");
+                                            const version = paymentVersion.current;
+                                            const isCurrent = () => {
+                                                const current = useUserStore.getState();
+                                                return version === paymentVersion.current && current.token === token && current.user?.id === user?.id;
+                                            };
+                                            try {
+                                                const status = await checkRechargeStatus(activeOrder.trade_no, token);
+                                                if (!isCurrent()) return;
+                                                if (status.paid) {
+                                                    stopPayment();
+                                                    setIsPaid(true);
+                                                    message.success("支付成功！");
+                                                    void loadWallet();
+                                                    onSuccess?.();
+                                                } else {
+                                                    message.info("暂未查询到微信到账，若已付款请等待数秒后刷新");
+                                                }
+                                            } catch {
+                                                if (isCurrent()) message.error("暂时无法查询支付状态，请稍后重试");
                                             }
                                         }}
                                     >
@@ -405,7 +413,7 @@ export function RechargeModal({
                                     支付成功，算力积分已到账！
                                 </h3>
                                 <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
-                                    充值金额：¥{activeOrder.amount}.00 · 获得 {Math.round(activeOrder.amount * exchangeRate).toLocaleString()} 积分
+                                    充值金额：¥{activeOrder.amount}.00 · 获得 {formatPoints(rechargePoints(activeOrder.amount))}
                                 </p>
                                 <Button
                                     type="primary"

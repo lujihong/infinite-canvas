@@ -22,6 +22,7 @@ function harness() {
         vm.runInNewContext(compiled.outputText, scope);
         return scope.exports;
     }
+    modules['./request-quote'] = load('../src/services/api/request-quote.ts');
     const api = load('../src/services/api/pricing.ts');
     return { users, requests, api, load };
 }
@@ -83,6 +84,23 @@ test('model IDs remain exact including case and spaces; public payloads are reje
     const publicPayload = api.fetchModelPricingList();
     succeed(requests[1], { model_name: 'model', points_cost: 7 });
     await assert.rejects(publicPayload, /不完整/);
+});
+
+test('picker prices require verified personal response and site transport, not a channel alias', async () => {
+    const { api, users, requests } = harness();
+    const configs = [{channelMode:'remote',activeChannelId:'channel-xyb'}, {channelMode:'local',activeChannelId:'private'}, {channelMode:'local',activeChannelId:'xyb-official-exclusive'}];
+    for (const c of configs) assert.equal(api.getModelPricingForRequest(c,'image'), undefined);
+    const pending = api.loadRemotePricing();
+    succeed(requests[0], model(1)); await pending;
+    for (const c of configs) assert.equal(api.getModelPricingForRequest(c,'image').group_quotes[0].usd_price, 1);
+    assert.equal(api.getModelPricingForRequest({channelMode:'direct'},'image'), undefined);
+    users.setState({token:'',user:{id:'a'}});
+    for (const c of configs) assert.equal(api.getModelPricingForRequest(c,'image'), undefined);
+    for (const name of ['model-picker','config-model-input']) {
+        const source = fs.readFileSync(path.resolve(__dirname, `../src/components/${name}.tsx`), 'utf8');
+        assert.match(source, /getModelPricingForRequest\(config, (option|item)\.model\)/);
+        assert.doesNotMatch(source, /const officialQuote/);
+    }
 });
 
 test('pricing details keep discount zero, final group rate, units and expression', () => {

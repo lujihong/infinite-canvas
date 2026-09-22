@@ -28,12 +28,12 @@ export type AuthPayload = {
 };
 
 export type UserWalletInfo = {
-    quota: number;
-    balanceYuan: number;
-    points?: number;
+    quota: number | null;
+    balanceYuan: number | null;
+    points: number | null;
     formattedPoints?: string;
     formattedBalance: string;
-    exchangeRate: number;
+    exchangeRate: number | null;
     minTopup: number;
 };
 

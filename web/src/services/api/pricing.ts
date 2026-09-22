@@ -2,6 +2,8 @@ import axios from "axios";
 import { useEffect } from "react";
 import { create } from "zustand";
 import { useUserStore } from "@/stores/use-user-store";
+import type { AiConfig } from "@/stores/use-config-store";
+import { requestUsesSiteBackend } from "./request-quote";
 
 export type ModelPricingItem = {
     model_name: string;
@@ -84,6 +86,12 @@ export function loadRemotePricing(): Promise<Map<string, ModelPricingItem>> {
         }
     });
     return pending;
+}
+
+// A returned personal-price row is verified by the server through AICCUserToken.
+// Channel IDs alone (including the exclusive alias) do not prove account binding.
+export function getModelPricingForRequest(config: Pick<AiConfig, "channelMode">, model: string) {
+    return requestUsesSiteBackend(config, useUserStore.getState().token) ? getModelPricing(model) : undefined;
 }
 
 export function getModelPricing(model: string) {

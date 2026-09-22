@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Drawer, Empty, Input, Modal, Skeleton, Tag, message } from "antd";
 import {
     AlertCircle,
@@ -35,6 +35,7 @@ import {
 import { useUserStore } from "@/stores/use-user-store";
 import { useWalletStore } from "@/stores/use-wallet-store";
 import { consumptionCostPresentation } from "./consumption-cost";
+import { formatPoints, isKnownPoints } from "@/lib/points";
 
 type ConsumptionLogsDrawerProps = {
     open: boolean;
@@ -68,29 +69,48 @@ export function ConsumptionLogsDrawer({
     const [loadingRecharge, setLoadingRecharge] = useState(false);
     const [checkingTradeNo, setCheckingTradeNo] = useState<string | null>(null);
 
+    const [logsAvailable, setLogsAvailable] = useState(false);
+    const [rechargeAvailable, setRechargeAvailable] = useState(false);
+    const logRequest = useRef(0);
+    const rechargeRequest = useRef(0);
+    const isCurrentUser = () => {
+        const current = useUserStore.getState();
+        return current.token === token && current.user?.id === user?.id;
+    };
+
     const loadConsumptionLogs = async () => {
-        if (!token) return;
+        const request = ++logRequest.current;
+        setLogsAvailable(false);
+        if (!token || !user) return;
         setLoadingLogs(true);
+        const isCurrent = () => request === logRequest.current && isCurrentUser();
         try {
             const data = await fetchUserConsumptionLogs(token);
+            if (!isCurrent()) return;
             setLogs(Array.isArray(data) ? data : []);
+            setLogsAvailable(Array.isArray(data));
         } catch {
-            setLogs([]);
+            if (isCurrent()) setLogs([]);
         } finally {
-            setLoadingLogs(false);
+            if (isCurrent()) setLoadingLogs(false);
         }
     };
 
     const loadRechargeLogs = async () => {
-        if (!token) return;
+        const request = ++rechargeRequest.current;
+        setRechargeAvailable(false);
+        if (!token || !user) return;
         setLoadingRecharge(true);
+        const isCurrent = () => request === rechargeRequest.current && isCurrentUser();
         try {
             const data = await fetchUserRechargeLogs(token);
+            if (!isCurrent()) return;
             setRechargeLogs(Array.isArray(data) ? data : []);
+            setRechargeAvailable(Array.isArray(data));
         } catch {
-            setRechargeLogs([]);
+            if (isCurrent()) setRechargeLogs([]);
         } finally {
-            setLoadingRecharge(false);
+            if (isCurrent()) setLoadingRecharge(false);
         }
     };
 
@@ -136,6 +156,10 @@ export function ConsumptionLogsDrawer({
             setLogs([]);
             setRechargeLogs([]);
         }
+        return () => {
+            logRequest.current++;
+            rechargeRequest.current++;
+        };
     }, [open, initialTab, token, user?.id]);
 
     // 消费分类、状态与关键词过滤
@@ -178,13 +202,9 @@ export function ConsumptionLogsDrawer({
 
     // 统计总积分净消耗（消费为加，失败退款 type===6 自动核减，真实反映实际净扣费）
     const totalPointsSpent = useMemo(() => {
-        const sum = logs.reduce((acc, cur) => {
-            if (cur.type === 6) {
-                return acc - (cur.points_cost || 0);
-            }
-            return acc + (cur.points_cost || 0);
-        }, 0);
-        return Math.max(0, Math.round(sum * 100) / 100);
+        if (logs.some(log => log.status === "processing" || !isKnownPoints(log.points_cost))) return null;
+        const sum = logs.reduce((acc, cur) => acc + (cur.type === 6 || cur.status === "refunded" ? -cur.points_cost : cur.points_cost), 0);
+        return Math.max(0, sum);
     }, [logs]);
 
     // 统计充值总额与总积分
@@ -195,7 +215,7 @@ export function ConsumptionLogsDrawer({
         for (const item of rechargeLogs) {
             if (item.status === "success" || item.status === "SUCCESS") {
                 moneySum += item.money || Number(item.amount) || 0;
-                pointsSum += item.points || (item.money ? item.money * 10 : 0);
+                pointsSum += isKnownPoints(item.points) ? item.points : NaN;
                 count++;
             }
         }
@@ -301,10 +321,7 @@ export function ConsumptionLogsDrawer({
                                     <span>当前可用算力余额</span>
                                 </div>
                                 <div className="mt-1.5 font-mono text-2xl font-bold text-stone-900 dark:text-stone-100">
-                                    {wallet ? `${(wallet.balanceYuan * (wallet.exchangeRate || 10)).toFixed(1)} 积分` : "0.0 积分"}
-                                </div>
-                                <div className="mt-0.5 text-[11px] text-stone-400">
-                                    折合 {wallet?.formattedBalance || "¥ 0.00"}
+                                    {formatPoints(wallet?.points)}
                                 </div>
                             </div>
 
@@ -314,7 +331,7 @@ export function ConsumptionLogsDrawer({
                                     <span>累计历史调用扣费</span>
                                 </div>
                                 <div className="mt-1.5 font-mono text-2xl font-bold text-stone-900 dark:text-stone-100">
-                                    {totalPointsSpent} 积分
+                                    {formatPoints(logsAvailable ? totalPointsSpent : null)}
                                 </div>
                                 <div className="mt-0.5 text-[11px] text-stone-400">
                                     共计记录 {logs.length} 次生成调用
@@ -654,7 +671,7 @@ export function ConsumptionLogsDrawer({
                             <div className="rounded-xl border border-stone-200/80 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/60">
                                 <div className="text-[11px] text-stone-500 dark:text-stone-400">累计获得算力</div>
                                 <div className="mt-1 font-mono text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                                    +{totalRechargedPoints.toFixed(1)} 积分
+                                    {formatPoints(rechargeAvailable ? totalRechargedPoints : null, "+")}
                                 </div>
                             </div>
                             <div className="rounded-xl border border-stone-200/80 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/60">
@@ -712,7 +729,7 @@ export function ConsumptionLogsDrawer({
 
                                                 <div className="text-right shrink-0">
                                                     <div className="font-mono text-base font-extrabold text-emerald-600 dark:text-emerald-400">
-                                                        +{item.points.toFixed(1)} 积分
+                                                        {formatPoints(item.points, "+")}
                                                     </div>
                                                     <div className="text-xs font-semibold text-stone-600 dark:text-stone-400">
                                                         实付 ¥{(item.money || item.amount).toFixed(2)}
@@ -861,7 +878,7 @@ export function ConsumptionLogsDrawer({
                             <div>
                                 <span className="text-stone-400">积分结算：</span>
                                 <span className="font-mono font-bold text-amber-600 dark:text-amber-400 ml-1">
-                                    {selectedDetailLog.formatted_points} ({selectedDetailLog.formatted_money})
+                                    {consumptionCostPresentation(selectedDetailLog).amount}
                                 </span>
                             </div>
                         </div>

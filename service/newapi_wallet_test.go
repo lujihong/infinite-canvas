@@ -31,6 +31,7 @@ func TestWalletZeroLocalAndFailures(t *testing.T) {
 	}{
 		{name: "zero", extra: `{"newapi_token":"wallet-test"}`, quota: `{"success":true,"data":{"quota":0}}`},
 		{name: "tiny", extra: `{"newapi_token":"wallet-test"}`, quota: `{"success":true,"data":{"quota":1}}`, want: .00002},
+		{name: "prefixed-token", extra: `{"newapi_token":"sk-wallet-test"}`, quota: `{"success":true,"data":{"quota":1}}`, want: .00002},
 		{name: "non-default", extra: `{"newapi_token":"wallet-test"}`, quota: `{"success":true,"data":{"quota":1}}`, status: `{"success":true,"data":{"quota_per_unit":1000000}}`, want: .00001},
 		{name: "local", local: true, want: 123},
 		{name: "malformed-binding", extra: `{`, failure: true},
@@ -63,7 +64,7 @@ func TestWalletZeroLocalAndFailures(t *testing.T) {
 					}
 					fmt.Fprint(w, status)
 				case "/api/user/quota-by-token":
-					if r.Header.Get("Authorization") != "Bearer sk-wallet-test" {
+					if r.Header.Get("Authorization") != "Bearer wallet-test" {
 						t.Error("wrong identity")
 					}
 					if tc.httpCode != 0 {

@@ -12,6 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/tigerowo/infinite-canvas/model"
+	"github.com/tigerowo/infinite-canvas/repository"
 )
 
 func quoteTestInput() RequestQuoteInput {
@@ -66,6 +69,56 @@ func TestRequestQuoteWrapperAndPoints(t *testing.T) {
 				t.Fatalf("usage contract: %+v", got)
 			}
 		})
+	}
+}
+
+func TestRequestQuoteBindingNeverFallsBackToChannelKeys(t *testing.T) {
+	db, err := repository.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		t.Error("unbound quote contacted upstream with a fallback credential")
+	}))
+	defer upstream.Close()
+	t.Setenv("NEWAPI_BASE_URL", upstream.URL)
+	settings, err := repository.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = repository.SaveSettings(settings, "") })
+	withPublicKey := settings
+	withPublicKey.Private.Channels = []model.ModelChannel{{ID: "channel-xyb", BaseURL: upstream.URL, APIKey: "public-secret", Models: []string{"video"}, Enabled: true}}
+	if _, err := repository.SaveSettings(withPublicKey, ""); err != nil {
+		t.Fatal(err)
+	}
+	user := model.User{ID: "quote-no-binding", Username: "quote-no-binding", AffCode: "quote-no-binding", Status: model.UserStatusActive, Role: model.UserRoleAdmin}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		db.Where("user_id = ?", user.ID).Delete(&model.UserConfig{})
+		db.Where("id = ?", user.ID).Delete(&model.User{})
+	})
+	local := fmt.Sprintf(`{"localChannels":[{"id":"local-history","baseUrl":%q,"apiKey":"private-secret","models":["video"]}]}`, upstream.URL)
+	if _, err := repository.SaveUserConfig(model.UserConfig{UserID: user.ID, ModelConfig: local}); err != nil {
+		t.Fatal(err)
+	}
+	for _, extra := range []string{"", `{}`, `{"newapi_token":"token-only"}`, `{"newapi_user_id":3}`, `{"newapi_user_id":0,"newapi_token":"token"}`, `{"newapi_user_id":-1,"newapi_token":"token"}`, `{"newapi_user_id":3,"newapi_token":" "}`, `{bad`} {
+		if err := db.Model(&model.User{}).Where("id = ?", user.ID).Update("extra", extra).Error; err != nil {
+			t.Fatal(err)
+		}
+		for _, headers := range [][2]string{{"", ""}, {"xyb-official-exclusive", ""}, {"channel-xyb", ""}, {"", "local-history"}, {"channel-xyb", "local-history"}} {
+			got, err := FetchRequestQuote(context.Background(), user.ID, quoteTestInput(), headers[0], headers[1])
+			if err != nil || got.Status != "unavailable" || got.PointsCost != nil || !strings.Contains(got.Message, "未绑定") {
+				t.Fatalf("unbound quote must stay unknown: %+v %v", got, err)
+			}
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("borrowed public/private key")
 	}
 }
 
@@ -153,6 +206,6 @@ func TestRequestQuoteValidation(t *testing.T) {
 	}
 	got, err := FetchRequestQuote(context.Background(), "someone", quoteTestInput(), "local-channel", "")
 	if err != nil || got.Status != "unavailable" || got.PointsCost != nil {
-		t.Fatal("local channel must not resolve credentials")
+		t.Fatal("missing binding must remain unknown regardless of channel ID")
 	}
 }

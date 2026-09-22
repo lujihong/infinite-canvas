@@ -6,7 +6,7 @@ import { Popover } from "antd";
 
 import { cn } from "@/lib/utils";
 import { RECOMMENDED_AUDIO_MODELS } from "@/lib/audio-generation";
-import { getModelPricing, loadRemotePricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
+import { getModelPricing, getModelPricingForRequest, loadRemotePricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
 import {
     filterModelsByCapability,
     normalizeLocalChannels,
@@ -291,8 +291,7 @@ export function ModelPicker({
                 {displayOptions.length > 0 ? (
                     displayOptions.map((option) => {
                         const isSelected = option.model === value && (!channelId || option.channelId === channelId);
-                        const officialQuote = option.channelId === "xyb-official-exclusive" || (config.channelMode === "remote" && !option.channelId);
-                        const pricing = officialQuote ? getModelPricing(option.model) : undefined;
+                        const pricing = getModelPricingForRequest(config, option.model);
                         return (
                             <button
                                 key={option.key}
@@ -327,7 +326,7 @@ export function ModelPicker({
                                                 {pricing.formatted_points_cost}
                                             </span>
                                         ) : (
-                                            <span>{!officialQuote ? "自有渠道 · 不使用本站积分报价" : personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
+                                            <span>{personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
                                         )}
                                     </span>
                                     {option.channelName ? (

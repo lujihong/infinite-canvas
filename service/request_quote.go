@@ -116,11 +116,8 @@ func FetchRequestQuote(ctx context.Context, userID string, input RequestQuoteInp
 	if err := validateRequestQuote(input); err != nil {
 		return nil, err
 	}
-	for _, id := range []string{channelID, userChannelID} {
-		if id = strings.TrimSpace(id); id != "" && id != "xyb-official-exclusive" {
-			return unavailableRequestQuote(input, "当前渠道为用户自有或非官方渠道，无法提供中转站积分报价，请以供应商实际账单为准"), nil
-		}
-	}
+	// Generation's selectAIRequestChannel resolves this binding before either channel header.
+	// Historical/public/local IDs cannot override it; failed bindings must never use fallback keys.
 	token, err := AICCUserToken(userID)
 	if err != nil {
 		return unavailableRequestQuote(input, "当前账号未绑定专属中转站身份，无法获取本人报价"), nil

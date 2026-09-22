@@ -10,7 +10,7 @@ import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { CreditSymbol } from "@/constant/credits";
 import { cn } from "@/lib/utils";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { fetchUserWallet, type UserWalletInfo } from "@/services/api/auth";
+import { formatPoints } from "@/lib/points";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -86,14 +86,11 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     type="button"
                     onClick={openRechargeModal}
                     className="box-border inline-flex h-8 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 text-xs font-semibold leading-none text-amber-700 transition hover:bg-amber-500/20 hover:border-amber-500/50 dark:border-amber-400/30 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50 shadow-xs"
-                    title={`当前可用算力：${wallet?.formattedPoints || (wallet ? `${(wallet.balanceYuan * (wallet.exchangeRate || 10)).toFixed(1)} 积分` : "0.0 积分")} (折合 ${wallet?.formattedBalance || "¥0.00"})\n点击查看算力详情与在线充值`}
+                    title={`当前可用算力：${formatPoints(wallet?.points)}\n点击查看算力详情与在线充值`}
                 >
                     <Zap className="size-3.5 fill-amber-500 text-amber-500 shrink-0" />
                     <span className="font-mono font-bold tracking-tight">
-                        {wallet?.formattedPoints || (wallet ? `${(wallet.balanceYuan * (wallet.exchangeRate || 10)).toFixed(1)} 积分` : "算力")}
-                    </span>
-                    <span className="hidden xl:inline text-[10px] font-medium opacity-70">
-                        ({wallet?.formattedBalance || "¥0.00"})
+                        {formatPoints(wallet?.points)}
                     </span>
                     <span className="rounded bg-amber-500/25 px-1 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-200 shrink-0">
                         充值

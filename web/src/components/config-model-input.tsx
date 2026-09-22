@@ -6,7 +6,7 @@ import { Check, ChevronDown, Cpu, Sparkles, Zap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { RECOMMENDED_AUDIO_MODELS } from "@/lib/audio-generation";
-import { getModelPricing, loadRemotePricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
+import { getModelPricing, getModelPricingForRequest, loadRemotePricing, personalPricingDetails, usePersonalPricing } from "@/services/api/pricing";
 import {
     filterModelsByCapability,
     normalizeLocalChannels,
@@ -163,8 +163,7 @@ export function ConfigModelInput({
         }
 
         const result: Array<{ value: string; label: React.ReactNode; disabled?: boolean }> = matched.map((item) => {
-            const officialQuote = item.channelId === "xyb-official-exclusive" || (config.channelMode === "remote" && (!item.channelId || item.channelId === "remote-default"));
-            const pricing = officialQuote ? getModelPricing(item.model) : undefined;
+            const pricing = getModelPricingForRequest(config, item.model);
             const isSelected = (value || "").trim().toLowerCase() === item.model.toLowerCase();
             const isRecommendedAudio = item.channelId === "recommended-audio";
             return {
@@ -206,7 +205,7 @@ export function ConfigModelInput({
                                         {pricing.formatted_points_cost}
                                     </span>
                                 ) : (
-                                    <span>{!officialQuote ? "自有渠道 · 不使用本站积分报价" : personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
+                                    <span>{personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
                                 )}
                             </span>
                             {item.channelName ? (

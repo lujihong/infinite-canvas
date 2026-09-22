@@ -98,11 +98,21 @@ func TestRequestQuoteRouteSessionIdentityAndNoSideEffects(t *testing.T) {
 	if calls.Load() != 2 {
 		t.Fatal("missing quote calls")
 	}
+	expectedToken.Store("Bearer sk-quote-a")
 	for _, header := range []string{"X-Model-Channel-ID", "X-User-Model-Channel-ID"} {
-		w := call(session(users[0]), wrapper, map[string]string{header: "external-vendor"})
-		if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"unavailable"`) || !strings.Contains(w.Body.String(), `"points_cost":null`) {
-			t.Fatal(w.Body.String())
+		for _, id := range []string{"channel-xyb", "external-vendor", "local-history"} {
+			w := call(session(users[0]), wrapper, map[string]string{header: id})
+			if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"estimated"`) || !strings.Contains(w.Body.String(), `"formatted_points_cost":"预计消耗 0.00002 积分"`) {
+				t.Fatal(w.Body.String())
+			}
 		}
+	}
+	w := call(session(users[0]), wrapper, map[string]string{"X-Model-Channel-ID": "channel-xyb", "X-User-Model-Channel-ID": "local-history"})
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"estimated"`) {
+		t.Fatal(w.Body.String())
+	}
+	if calls.Load() != 9 {
+		t.Fatal("bound identity must override both channel headers")
 	}
 	for _, token := range []string{"", "sk-someone-else"} {
 		if call(token, wrapper, nil).Code != http.StatusUnauthorized {
@@ -117,7 +127,7 @@ func TestRequestQuoteRouteSessionIdentityAndNoSideEffects(t *testing.T) {
 	if call(session(users[0]), strings.Repeat(" ", service.RequestQuoteMaxBytes+1), nil).Code != 413 {
 		t.Fatal("oversize body accepted")
 	}
-	if calls.Load() != 2 {
+	if calls.Load() != 9 {
 		t.Fatal("unexpected upstream side effect")
 	}
 	for i, table := range tables {
