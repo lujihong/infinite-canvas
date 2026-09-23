@@ -9,6 +9,7 @@ import { BrandLogo } from "@/components/layout/brand-logo";
 import { fetchCurrentUser, requestPasswordReset, sendEmailVerification } from "@/services/api/auth";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { captureSessionIdentity, isSessionIdentityCurrent } from "@/lib/session-identity";
 
 type AuthFormValues = {
     username?: string;
@@ -58,11 +59,17 @@ function LoginContent() {
         const error = searchParams.get("error");
         if (error) message.error(error);
         if (!token) return;
-        void fetchCurrentUser(token).then((user) => {
-            setSession(token, user);
+        const callbackIdentity = captureSessionIdentity();
+        void fetchCurrentUser(token).then(async (user) => {
+            if (!isSessionIdentityCurrent(callbackIdentity)) return;
+            await setSession(token, user);
+            const active = captureSessionIdentity();
+            if (active.token !== token || active.userId !== user.id) return;
             message.success("登录成功");
             router.replace(redirect);
             router.refresh();
+        }).catch((error) => {
+            if (isSessionIdentityCurrent(callbackIdentity)) message.error(error instanceof Error ? error.message : "登录验证失败");
         });
     }, [message, redirect, router, searchParams, setSession]);
 

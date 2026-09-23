@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "antd";
 import { LogIn } from "lucide-react";
@@ -8,6 +8,12 @@ import { LogIn } from "lucide-react";
 import { AppTopNav } from "@/components/layout/app-top-nav";
 import { fetchUserConfig } from "@/services/api/user-config";
 import { useUserStore } from "@/stores/use-user-store";
+import { captureSessionIdentity, subscribeSessionIdentity } from "@/lib/session-identity";
+
+const sameIdentity = (expected: ReturnType<typeof captureSessionIdentity>) => {
+    const current = captureSessionIdentity();
+    return current.epoch === expected.epoch && current.token === expected.token && current.userId === expected.userId;
+};
 
 const PROTECTED_PAGE_NAMES: Record<string, string> = {
     "/canvas": "我的画布",
@@ -25,7 +31,7 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     const user = useUserStore((state) => state.user);
     const isReady = useUserStore((state) => state.isReady);
     const openLoginModal = useUserStore((state) => state.openLoginModal);
-    const wasLoggedOutRef = useRef(false);
+    const identityEpoch = useSyncExternalStore(subscribeSessionIdentity, () => captureSessionIdentity().epoch, () => 0);
 
     const protectedEntry = Object.entries(PROTECTED_PAGE_NAMES).find(
         ([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`)
@@ -42,31 +48,24 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     }, [isProtectedPage, isReady, user, openLoginModal]);
 
     useEffect(() => {
-        if (!isReady) return;
-        if (!user) {
-            wasLoggedOutRef.current = true;
-            return;
-        }
-        const syncCanvasAfterLogin = wasLoggedOutRef.current;
-        const token = useUserStore.getState().token;
+        if (!isReady || !user) return;
+        const identity = captureSessionIdentity();
+        const token = identity.token;
         if (!token) return;
-        wasLoggedOutRef.current = false;
-        fetchUserConfig(token).then(async (config) => {
+        void fetchUserConfig(token).then(async (config) => {
+            const current = captureSessionIdentity();
+            if (current.epoch !== identity.epoch || current.token !== identity.token || current.userId !== identity.userId) return;
             const syncEnabled = config.syncCapabilities?.userData === true;
             const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
+            if (!isReady || !sameIdentity(identity)) return;
             const canvasStore = useCanvasStore.getState();
             canvasStore.setSyncEnabled(syncEnabled);
-            if (
-                syncCanvasAfterLogin &&
-                syncEnabled &&
-                canvasStore.hydrated
-            ) {
-                void canvasStore.syncWithRemote(token, true);
-            }
+            if (syncEnabled && canvasStore.hydrated) void canvasStore.syncWithRemote(token, true);
             const { useAssetStore } = await import("@/stores/use-asset-store");
+            if (!isReady || !sameIdentity(identity)) return;
             void useAssetStore.getState().hydrateAccountAssets(token, syncEnabled);
-        }).catch(() => { });
-    }, [isReady, user]);
+        }).catch(() => {});
+    }, [identityEpoch, isReady, user]);
 
     // 账号水合验证过程中，若访问受保护板块先进行平滑加载过渡，防止闪烁
     if (isProtectedPage && !isReady) {
@@ -125,10 +124,11 @@ export default function UserLayout({ children }: { children: ReactNode }) {
         );
     }
 
+    const identity = captureSessionIdentity();
     return (
         <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
             <AppTopNav />
-            <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+            <div key={`${user?.id || "guest"}:${identityEpoch}`} className="min-h-0 flex-1 overflow-hidden">{children}</div>
         </div>
     );
 }

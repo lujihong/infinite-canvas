@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 import { useUserStore } from "@/stores/use-user-store";
+import { canPersistSessionData, captureSessionIdentity, isSessionIdentityCurrent } from "@/lib/session-identity";
 
 export type AspectRatio = "16:9" | "9:16" | "1:1" | "4:3";
 export type TrackType = "video" | "audio" | "text" | "overlay";
@@ -504,11 +505,13 @@ export const useEditorStore = create<EditorStore>()(
 
             loadProjectDraft: (projectId = "", userId = "") => {
                 if (typeof window === "undefined") return;
+                const identity = captureSessionIdentity();
                 const targetUserId = userId || useUserStore.getState().user?.id || "guest";
                 const targetProjectId = projectId.trim() || "default";
-                set({ activeProjectId: targetProjectId });
                 const key = `infinite-canvas:editor_store:${targetUserId}:${targetProjectId}`;
                 const raw = window.localStorage.getItem(key);
+                if (!isSessionIdentityCurrent(identity) || targetUserId !== (identity.userId || "guest")) return;
+                currentActiveProjectId = targetProjectId;
                 if (raw) {
                     try {
                         const parsed = JSON.parse(raw);
@@ -547,20 +550,17 @@ export const useEditorStore = create<EditorStore>()(
             storage: createJSONStorage(() => ({
                 getItem: (key) => {
                     if (typeof window === "undefined") return null;
-                    const user = useUserStore.getState().user;
-                    const scopedKey = `${key}:${user?.id || "guest"}:${currentActiveProjectId || "default"}`;
+                    const scopedKey = `${key}:${captureSessionIdentity().userId || "guest"}:${currentActiveProjectId || "default"}`;
                     return window.localStorage.getItem(scopedKey);
                 },
                 setItem: (key, value) => {
-                    if (typeof window === "undefined") return;
-                    const user = useUserStore.getState().user;
-                    const scopedKey = `${key}:${user?.id || "guest"}:${currentActiveProjectId || "default"}`;
+                    if (typeof window === "undefined" || !canPersistSessionData()) return;
+                    const scopedKey = `${key}:${captureSessionIdentity().userId || "guest"}:${currentActiveProjectId || "default"}`;
                     window.localStorage.setItem(scopedKey, value);
                 },
                 removeItem: (key) => {
-                    if (typeof window === "undefined") return;
-                    const user = useUserStore.getState().user;
-                    const scopedKey = `${key}:${user?.id || "guest"}:${currentActiveProjectId || "default"}`;
+                    if (typeof window === "undefined" || !canPersistSessionData()) return;
+                    const scopedKey = `${key}:${captureSessionIdentity().userId || "guest"}:${currentActiveProjectId || "default"}`;
                     window.localStorage.removeItem(scopedKey);
                 },
             })),

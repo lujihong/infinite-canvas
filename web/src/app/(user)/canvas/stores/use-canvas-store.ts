@@ -6,6 +6,7 @@ import { localForageStorage } from "@/lib/localforage-storage";
 import { deleteCanvasProjects, listCanvasProjects, saveCanvasProject, syncCanvasProjects } from "@/services/api/canvas-tasks";
 import { fetchUserConfig } from "@/services/api/user-config";
 import { useUserStore } from "@/stores/use-user-store";
+import { canPersistSessionData, captureSessionIdentity, isSessionIdentityCurrent } from "@/lib/session-identity";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { CanvasNodeType, type CanvasAgentConfig, type CanvasAssistantSession, type CanvasConnection, type CanvasNodeData, type CanvasPendingAgentRequest, type ViewportTransform } from "../types";
 
@@ -52,14 +53,15 @@ type CanvasStore = {
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
-function getScopedStorageKey(name: string) {
+function getScopedStorageKey(name: string, userId?: string) {
     const user = useUserStore.getState().user;
-    return `${name}:${user?.id || "guest"}`;
+    return `${name}:${userId || user?.id || "guest"}`;
 }
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
 let accountCanvasSyncEnabled = false;
+let canvasHydrationVersion = 0;
 const projectSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function waitForUserStoreHydration() {
@@ -78,11 +80,12 @@ function waitForUserStoreHydration() {
     });
 }
 
-const pendingProjectsToSave = new Map<string, CanvasProject>();
+const pendingProjectsToSave = new Map<string, { project: CanvasProject; identity: ReturnType<typeof captureSessionIdentity> }>();
 
 function queueProjectSave(project: CanvasProject) {
-    const token = useUserStore.getState().token;
-    pendingProjectsToSave.set(project.id, project);
+    const identity = captureSessionIdentity();
+    if (!identity.token || !canPersistSessionData()) return;
+    pendingProjectsToSave.set(project.id, { project, identity });
 
     const previous = projectSaveTimers.get(project.id);
     if (previous) clearTimeout(previous);
@@ -91,14 +94,14 @@ function queueProjectSave(project: CanvasProject) {
         project.id,
         setTimeout(() => {
             projectSaveTimers.delete(project.id);
-            const currentToken = useUserStore.getState().token;
-            if (!currentToken || currentToken !== token) {
+            if (!canPersistSessionData() || !isSessionIdentityCurrent(identity)) {
+                pendingProjectsToSave.delete(project.id);
                 return;
             }
-            const target = pendingProjectsToSave.get(project.id);
-            if (target) {
+            const entry = pendingProjectsToSave.get(project.id);
+            if (entry && isSessionIdentityCurrent(entry.identity)) {
                 pendingProjectsToSave.delete(project.id);
-                void saveCanvasProject(currentToken, target).catch((err) => {
+                void saveCanvasProject(entry.identity.token, entry.project).catch((err) => {
                     console.error("Failed to persist canvas project to server:", err);
                 });
             }
@@ -107,23 +110,24 @@ function queueProjectSave(project: CanvasProject) {
 }
 
 export function flushPendingCanvasProjectSaves() {
-    const token = useUserStore.getState().token;
-    if (!token || pendingProjectsToSave.size === 0) return;
+    const identity = captureSessionIdentity();
+    if (!identity.token || !canPersistSessionData() || pendingProjectsToSave.size === 0) return;
 
-    pendingProjectsToSave.forEach((proj, id) => {
+    pendingProjectsToSave.forEach((entry, id) => {
         const timer = projectSaveTimers.get(id);
         if (timer) {
             clearTimeout(timer);
             projectSaveTimers.delete(id);
         }
         try {
-            const body = JSON.stringify({ data: proj });
+            if (!isSessionIdentityCurrent(entry.identity)) return;
+            const body = JSON.stringify({ data: entry.project });
             if (typeof fetch !== "undefined") {
                 void fetch("/api/v1/canvas/projects", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
+                        Authorization: `Bearer ${entry.identity.token}`,
                     },
                     body,
                     keepalive: true,
@@ -321,10 +325,19 @@ export function normalizeCanvasProject(raw: unknown): CanvasProject {
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
+        const hydrationVersion = ++canvasHydrationVersion;
+        const identity = captureSessionIdentity();
+        const assertCurrent = () => {
+            if (hydrationVersion !== canvasHydrationVersion || !isSessionIdentityCurrent(identity)) {
+                throw new Error("画布加载已因账号切换取消");
+            }
+        };
         await waitForUserStoreHydration();
-        const scopedKey = getScopedStorageKey(name);
+        assertCurrent();
+        const scopedKey = getScopedStorageKey(name, identity.userId || "guest");
         const localValue = await localForageStorage.getItem(scopedKey);
-        const token = useUserStore.getState().token;
+        assertCurrent();
+        const token = identity.token;
         const localParsed = localValue
             ? (JSON.parse(localValue) as StorageValue<CanvasStore>)
             : null;
@@ -340,6 +353,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
                     fetchUserConfig(token),
                     listCanvasProjects(token),
                 ]);
+                assertCurrent();
                 const remoteProjects = (
                     Array.isArray(rawRemoteProjects) ? rawRemoteProjects : []
                 ).map(normalizeCanvasProject);
@@ -352,13 +366,15 @@ const canvasStorage: PersistStorage<CanvasStore> = {
                     state: nextState,
                     version: 0,
                 } as StorageValue<CanvasStore>;
-                queuedPersistState = nextState;
-                await localForageStorage.setItem(
-                    scopedKey,
-                    JSON.stringify(parsed),
-                );
+                assertCurrent();
+                if (canPersistSessionData()) {
+                    queuedPersistState = nextState;
+                    await localForageStorage.setItem(scopedKey, JSON.stringify(parsed));
+                    assertCurrent();
+                }
                 return parsed;
             } catch (error) {
+                assertCurrent();
                 console.error(
                     "Failed to hydrate canvas projects from remote",
                     error,
@@ -366,6 +382,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
             }
         }
 
+        assertCurrent();
         if (!localParsed) return null;
         const nextState = { projects: localProjects };
         queuedPersistState = nextState;
@@ -376,7 +393,9 @@ const canvasStorage: PersistStorage<CanvasStore> = {
     },
 
     setItem: (name, value) => {
-        const scopedKey = getScopedStorageKey(name);
+        const identity = captureSessionIdentity();
+        if (!canPersistSessionData() || !isSessionIdentityCurrent(identity)) return;
+        const scopedKey = getScopedStorageKey(name, identity.userId);
         const nextState = value.state as PersistedCanvasState;
         if (
             queuedPersistState &&
@@ -388,10 +407,14 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
             saveTimer = null;
+            if (!canPersistSessionData() || !isSessionIdentityCurrent(identity)) return;
             void localForageStorage.setItem(scopedKey, JSON.stringify(value));
         }, 400);
     },
-    removeItem: (name) => localForageStorage.removeItem(getScopedStorageKey(name)),
+    removeItem: (name) => {
+        if (!canPersistSessionData()) return Promise.resolve();
+        return localForageStorage.removeItem(getScopedStorageKey(name, captureSessionIdentity().userId));
+    },
 };
 
 export const useCanvasStore = create<CanvasStore>()(
@@ -500,12 +523,14 @@ export const useCanvasStore = create<CanvasStore>()(
                 queueProjectSave(nextProject);
             },
             syncWithRemote: async (token, syncEnabled) => {
+                const identity = captureSessionIdentity();
+                if (identity.token !== token || !isSessionIdentityCurrent(identity)) return;
                 accountCanvasSyncEnabled = syncEnabled;
                 if (!syncEnabled) return;
                 const rawRemoteProjects = await listCanvasProjects(token).catch(
                     () => null,
                 );
-                if (!rawRemoteProjects) return;
+                if (!rawRemoteProjects || !isSessionIdentityCurrent(identity)) return;
                 const remoteProjects = (
                     Array.isArray(rawRemoteProjects) ? rawRemoteProjects : []
                 ).map(normalizeCanvasProject);
@@ -516,7 +541,8 @@ export const useCanvasStore = create<CanvasStore>()(
                 const nextState = { projects: remoteProjects };
                 queuedPersistState = nextState;
                 set(nextState);
-                const scopedKey = getScopedStorageKey(CANVAS_STORE_KEY);
+                const scopedKey = getScopedStorageKey(CANVAS_STORE_KEY, identity.userId);
+                if (!canPersistSessionData() || !isSessionIdentityCurrent(identity)) return;
                 await localForageStorage.setItem(
                     scopedKey,
                     JSON.stringify({ state: nextState, version: 0 }),
@@ -526,6 +552,8 @@ export const useCanvasStore = create<CanvasStore>()(
                 accountCanvasSyncEnabled = enabled;
             },
             reset: () => {
+                canvasHydrationVersion++;
+                accountCanvasSyncEnabled = false;
                 if (saveTimer) {
                     clearTimeout(saveTimer);
                     saveTimer = null;
@@ -544,8 +572,11 @@ export const useCanvasStore = create<CanvasStore>()(
                 ({
                     projects: state.projects,
                 }) as StorageValue<CanvasStore>["state"],
-            onRehydrateStorage: () => () => {
-                useCanvasStore.setState({ hydrated: true });
+            onRehydrateStorage: () => {
+                const identity = captureSessionIdentity();
+                return (_state, error) => {
+                    if (!error && isSessionIdentityCurrent(identity)) useCanvasStore.setState({ hydrated: true });
+                };
             },
         },
     ),

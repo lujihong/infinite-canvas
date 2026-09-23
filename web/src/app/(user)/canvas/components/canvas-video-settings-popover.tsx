@@ -17,7 +17,7 @@ export type CanvasVideoResourceOption = { nodeId: string; kind: "text" | "image"
 
 type CanvasVideoSettingsPopoverProps = {
     config: AiConfig;
-    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoMode" | "videoNegativePrompt" | "videoGenerateAudio" | "videoWatermark" | "videoCharacterOrientation", value: string) => void;
+    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoMode" | "videoNegativePrompt" | "videoGenerateAudio" | "videoWatermark" | "videoCharacterOrientation" | "videoGenerateAudioByModel", value: any) => void;
     frameOptions?: CanvasVideoFrameOption[];
     resourceOptions?: CanvasVideoResourceOption[];
     metadata?: CanvasNodeMetadata;

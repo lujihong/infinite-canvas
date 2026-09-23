@@ -53,6 +53,7 @@ import { deleteStoredImages, imageToDataUrl, resolveImageUrl, uploadImage, uploa
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
+import { captureSessionIdentity, isSessionIdentityCurrent, type SessionIdentity } from "@/lib/session-identity";
 
 type GeneratedImage = {
     id: string;
@@ -164,6 +165,8 @@ export default function ImagePage() {
     const addAsset = useAssetStore((state) => state.addAsset);
     const token = useUserStore((state) => state.token);
     const isUserReady = useUserStore((state) => state.isReady);
+    const sessionRef = useRef<SessionIdentity>(captureSessionIdentity());
+    const sessionCurrent = () => isSessionIdentityCurrent(sessionRef.current);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingCount, setUploadingCount] = useState(0);
@@ -810,14 +813,19 @@ export default function ImagePage() {
     const refreshCategories = async () => setCategories(await readStoredCategories());
 
     const loadAccountImageHistory = async (currentToken: string) => {
+        const session = sessionRef.current;
+        if (!sessionCurrent()) return undefined;
         try {
             accountHistorySyncEnabledRef.current = true;
-            const localLogs = await readStoredLogs();
-            const storedCategories = await readStoredCategories();
+            const localLogs = await readStoredLogs(session.userId);
+            const storedCategories = await readStoredCategories(session.userId);
             const remoteLogs = await fetchImageGenerationLogs<GenerationLog>(currentToken);
+            if (!isSessionIdentityCurrent(session)) return undefined;
             const mergedLogs = await mergeGenerationLogs(remoteLogs, localLogs);
             const categorized = withWorkflowLogCategories(mergedLogs, storedCategories);
-            await replaceStoredImageHistory(categorized.logs, categorized.categories);
+            if (!isSessionIdentityCurrent(session)) return undefined;
+            await replaceStoredImageHistory(categorized.logs, categorized.categories, session.userId);
+            if (!isSessionIdentityCurrent(session)) return undefined;
             setCategories(categorized.categories);
             setLogs(categorized.logs);
             return categorized.logs;
@@ -2550,11 +2558,11 @@ function errorDetail(error: unknown) {
     }
 }
 
-async function readStoredLogs() {
+async function readStoredLogs(userId?: string) {
     if (typeof window === "undefined") return [];
     try {
         const values: GenerationLog[] = [];
-        await getImageLogStore().iterate<GenerationLog, void>((value) => {
+        await getImageLogStore(userId).iterate<GenerationLog, void>((value) => {
             values.push(value);
         });
         const logs = await Promise.all(values.map(normalizeLog));
@@ -2564,21 +2572,23 @@ async function readStoredLogs() {
     }
 }
 
-async function readStoredCategories() {
+async function readStoredCategories(userId?: string) {
     if (typeof window === "undefined") return [];
     try {
-        const value = await getImageCategoryStore().getItem<GenerationCategory[]>(CATEGORY_STORE_KEY);
+        const value = await getImageCategoryStore(userId).getItem<GenerationCategory[]>(CATEGORY_STORE_KEY);
         return Array.isArray(value) ? value.filter((item) => item.id && item.name).sort((a, b) => a.createdAt - b.createdAt) : [];
     } catch {
         return [];
     }
 }
 
-async function replaceStoredImageHistory(logs: GenerationLog[], categories: GenerationCategory[]) {
+async function replaceStoredImageHistory(logs: GenerationLog[], categories: GenerationCategory[], userId?: string) {
     if (typeof window === "undefined") return;
-    await getImageLogStore().clear();
-    await Promise.all(logs.map((log) => getImageLogStore().setItem(log.id, serializeLog(log))));
-    await getImageCategoryStore().setItem(CATEGORY_STORE_KEY, categories);
+    const logStore = getImageLogStore(userId);
+    const categoryStore = getImageCategoryStore(userId);
+    await logStore.clear();
+    await Promise.all(logs.map((log) => logStore.setItem(log.id, serializeLog(log))));
+    await categoryStore.setItem(CATEGORY_STORE_KEY, categories);
 }
 
 function withWorkflowLogCategories(logs: GenerationLog[], categories: GenerationCategory[]) {

@@ -175,6 +175,26 @@ test('image edit scalars match actual multipart sender and normalize quality ali
   assert.deepEqual(Object.fromEntries(Object.entries(withoutImage).map(([k,v]) => [k,String(v)])),sentScalars);
 });
 
+test('both mobile Seedance models share effective audio in quote and actual FormData', async () => {
+  const h = harness();
+  for (const model of ['moma-seedance-2.0','nm-moma-seedance-2.0']) {
+    const key = model.replaceAll('.', '-');
+    for (const [settings, expected] of [
+      [{}, 'true'],
+      [{videoGenerateAudioByModel:{[key]:false}}, 'false'],
+      [{videoGenerateAudioByModel:{[key]:true}}, 'true'],
+      [{videoGenerateAudioByModel:{[key]:true},videoGenerateAudioExplicit:false}, 'false'],
+      [{videoGenerateAudioByModel:{[key]:false},videoGenerateAudioExplicit:true}, 'true'],
+    ]) {
+      const c=config({model,videoGenerateAudio:'false',...settings});
+      const q=h.quote({config:c,mode:'video',prompt:'Actual'});
+      const form=await h.video.createVideoRequestBody(c,model,'Actual',emptyRefs());
+      assert.equal(q.body.video_generate_audio,expected);
+      assert.equal(form.get('video_generate_audio'),expected);
+    }
+  }
+});
+
 test('unsupported protocols and invalid AICC metadata cannot masquerade as complete quotes', () => {
   const h = harness();
   for (const overrides of [{model:'agnes-video'},{model:'agnes-video-2.5'},{model:'agnes_video_2_5'},{model:'cogvideox-3'},{model:'veo-3.1-generate-preview',protocol:'gemini'}]) {

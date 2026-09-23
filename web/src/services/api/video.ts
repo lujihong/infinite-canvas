@@ -7,6 +7,7 @@ import { isGeminiVeo31Model, normalizeGeminiVideoDuration, normalizeGeminiVideoR
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { isKIEGrokVideoModel, isKIEKlingV3Config, kieKlingOmniVariant } from "@/components/video-settings-panel";
 import { isAgnesVideoV25Model, isCogVideoX3Model, modelKey, normalizeCogVideoX3Duration, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
+import { resolveVideoAudioPreference } from "@/lib/video-audio-preference";
 import { nanoid } from "nanoid";
 import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
@@ -448,7 +449,7 @@ function createVideoFormScalars(config: AiConfig, model: string, prompt: string)
         else body.append("preset", "normal");
     }
     if (motionControl) body.append("character_orientation", normalizeCharacterOrientation(config.videoCharacterOrientation));
-    if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, false)));
+    if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(resolveVideoAudioPreference(model, config.videoGenerateAudio, config.videoGenerateAudioByModel, config.videoGenerateAudioExplicit)));
     const referencePolicy = {
         imageLimit: kieKlingOmni === "text-to-video" ? 0 : kieKlingOmni === "reference-to-video" ? Infinity : kieKlingOmni === "transformation" ? 4 : kling ? 2 : 9,
         videoLimit: kling && kieKlingOmni !== "reference-to-video" && kieKlingOmni !== "transformation" ? 0 : kieKlingOmni ? 1 : Infinity,

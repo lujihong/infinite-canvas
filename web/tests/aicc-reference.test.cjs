@@ -15,7 +15,7 @@ test('saved AICC assets retain identity and never rehydrate obsolete storage',as
  const storeSource=fs.readFileSync(path.join(__dirname,'../src/stores/use-asset-store.ts'),'utf8');
  const code=ts.transpileModule(storeSource+'\nexport { resolveStoredAsset };',{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const exports={};
- const modules={zustand:{create:()=>()=>({})},'zustand/middleware':{persist:()=>({})},'@/services/image-storage':{resolveImageUrl:()=>{throw new Error('must not load old image')},uploadImage:()=>{throw new Error('must not upload preview')}},'@/services/file-storage':{resolveMediaUrl:()=>{throw new Error('must not load old media')}}};
+ const modules={'@/lib/session-identity':{isSessionIdentityCurrent:()=>true},zustand:{create:()=>()=>({})},'zustand/middleware':{persist:()=>({})},'@/services/image-storage':{resolveImageUrl:()=>{throw new Error('must not load old image')},uploadImage:()=>{throw new Error('must not upload preview')}},'@/services/file-storage':{resolveMediaUrl:()=>{throw new Error('must not load old media')}}};
  vm.runInNewContext(code,{exports,require:(name)=>modules[name]||{},console});
  for(const kind of ['image','video','audio']){
   const asset={id:'saved',kind,data:{aiccUri:'asset://asset-person',aiccChannelId:6,storageKey:'obsolete',dataUrl:'https://preview.invalid/a.png',url:'https://preview.invalid/a.mp4'}};

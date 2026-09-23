@@ -24,6 +24,7 @@ import { channelProtocolForConfig, defaultConfig, localChannelForActiveModel, no
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
+import { captureSessionIdentity, isSessionIdentityCurrent, type SessionIdentity } from "@/lib/session-identity";
 
 type WorkflowDraftQuote = { model: string; points: number; source: "local_credits"; unit: "request"; message: string };
 
@@ -285,6 +286,8 @@ export function CreativeWorkflowWorkspace({
     const token = useUserStore((state) => state.token);
     const quoteUserId = useUserStore((state) => state.user?.id);
     const isUserReady = useUserStore((state) => state.isReady);
+    const sessionRef = useRef<SessionIdentity>(captureSessionIdentity());
+    const sessionCurrent = () => isSessionIdentityCurrent(sessionRef.current);
     const [workflows, setWorkflows] = useState<CreativeWorkflow[]>([]);
     const [editingWorkflow, setEditingWorkflow] = useState<CreativeWorkflow | null>(null);
     const [runningWorkflow, setRunningWorkflow] = useState<CreativeWorkflow | null>(null);
@@ -375,9 +378,11 @@ export function CreativeWorkflowWorkspace({
                 workflowSyncEnabledRef.current = config.syncCapabilities?.workflows === true;
                 if (!workflowSyncEnabledRef.current) throw new Error("workflow sync unavailable");
                 const remote = await fetchUserWorkflows<CreativeWorkflow>(token);
+                if (!sessionCurrent()) return;
                 const workflows = remote.map(recordToWorkflow).sort((a, b) => b.updatedAt - a.updatedAt);
                 if (workflows.length) {
                     setWorkflows(workflows);
+                    if (!sessionCurrent()) return;
                     await getWorkflowStore().setItem(WORKFLOW_STORE_KEY, workflows);
                     return;
                 }
@@ -800,8 +805,11 @@ export function CreativeWorkflowWorkspace({
     };
 
     const saveWorkflowTaskLog = async (log: ImageHistoryLog) => {
-        await getWorkflowImageLogStore().setItem(log.id, serializeHistoryLog(log));
-        if (token) await saveImageGenerationLogs(token, [serializeHistoryLog(log)]).catch(() => undefined);
+        const session = sessionRef.current;
+        if (!sessionCurrent()) return;
+        await getWorkflowImageLogStore(session.userId).setItem(log.id, serializeHistoryLog(log));
+        if (!isSessionIdentityCurrent(session)) return;
+        if (token) await saveImageGenerationLogs(session.token, [serializeHistoryLog(log)]).catch(() => undefined);
     };
 
     const createWorkflowImageTasks = async ({
@@ -931,7 +939,9 @@ export function CreativeWorkflowWorkspace({
                     };
                 }),
             );
+            if (!sessionCurrent()) return;
             const category = await ensureWorkflowCategory(workflow.name);
+            if (!sessionCurrent()) return;
             const log = buildImageHistoryLog({
                 workflow,
                 prompt,
@@ -945,7 +955,9 @@ export function CreativeWorkflowWorkspace({
                 seriesTitle,
                 seriesIndex,
             });
-            await getWorkflowImageLogStore().setItem(log.id, serializeHistoryLog(log));
+            if (!sessionCurrent()) return;
+            await getWorkflowImageLogStore(sessionRef.current.userId).setItem(log.id, serializeHistoryLog(log));
+            if (!sessionCurrent()) return;
             onGenerationLogSaved?.();
             const finishedAt = Date.now();
             setWorkflows((value) => {

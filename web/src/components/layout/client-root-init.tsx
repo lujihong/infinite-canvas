@@ -9,12 +9,14 @@ import { fetchUserConfig } from "@/services/api/user-config";
 import { defaultUserStorageProvider, defaultUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider } from "@/services/image-storage";
 import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { captureSessionIdentity, isSessionIdentityCurrent } from "@/lib/session-identity";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
     const handledConfigParams = useRef(false);
     const pathname = usePathname();
     const token = useUserStore((state) => state.token);
+    const isReady = useUserStore((state) => state.isReady);
     const user = useUserStore((state) => state.user);
     const hydrateUser = useUserStore((state) => state.hydrateUser);
     const loadPublicSettings = useConfigStore((state) => state.loadPublicSettings);
@@ -26,8 +28,9 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const adminRemoteTokenRef = useRef("");
 
     useEffect(() => {
+        if (!isReady) return;
         void loadPublicSettings();
-    }, [loadPublicSettings]);
+    }, [isReady, loadPublicSettings]);
 
     useEffect(() => {
         if (!isLoginPage) void hydrateUser();
@@ -40,9 +43,11 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, [channelMode, token, updateConfig, user?.role]);
 
     useEffect(() => {
-        if (!token || !user?.id) return;
+        if (!isReady || !token || !user?.id) return;
+        const identity = captureSessionIdentity();
         void fetchUserConfig(token)
             .then((payload) => {
+                if (!isSessionIdentityCurrent(identity)) return;
                 const syncS3 = payload.modelConfig?.syncStorageConfig === true;
                 const syncWebDAV = payload.modelConfig?.syncWebDAVStorageConfig === true;
                 if (payload.modelConfig) {
@@ -67,7 +72,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 }
             })
             .catch(() => {});
-    }, [token, updateConfig, user?.id]);
+    }, [isReady, token, updateConfig, user?.id]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;

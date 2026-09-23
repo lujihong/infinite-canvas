@@ -7,6 +7,7 @@ import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceFastOrMiniModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { COGVIDEOX3_DURATIONS, isCogVideoX3Model, modelKey, normalizeCogVideoX3Duration, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
+import { resolveVideoAudioPreference } from "@/lib/video-audio-preference";
 import { channelIdForActiveModel, channelProtocolForConfig, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
 
 export const videoResolutionOptions = [
@@ -73,7 +74,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
     const dimensions = readSizeDimensions(size);
     const resolution = normalizeVideoResolutionValue(config.vquality);
     const audioGenerationEnabled = supportsVideoAudioGeneration(model);
-    const generateAudio = boolConfig(config.videoGenerateAudio, false);
+    const generateAudio = resolveVideoAudioPreference(modelName || config.model || config.videoModel, config.videoGenerateAudio, config.videoGenerateAudioByModel, config.videoGenerateAudioExplicit);
     const updateResolution = (value: string) => {
         const nextResolution = normalizeVideoResolutionValue(value);
         onConfigChange("vquality", nextResolution);
@@ -188,7 +189,7 @@ function KlingV26VideoSettingsPanel({ config, modelName, onConfigChange, theme, 
     const mode = isV3 && config.videoMode === "4k" ? "4k" : config.videoMode === "pro" ? "pro" : "std";
     const ratio = normalizeKlingV26Ratio(config.size);
     const duration = isV3 ? normalizeKlingV3Duration(config.videoSeconds) : normalizeKlingV26Duration(config.videoSeconds);
-    const generateAudio = boolConfig(config.videoGenerateAudio, false);
+    const generateAudio = resolveVideoAudioPreference(modelName || config.model || config.videoModel, config.videoGenerateAudio, config.videoGenerateAudioByModel, config.videoGenerateAudioExplicit);
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -269,7 +270,7 @@ function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, 
     const duration = normalizeSeedanceDuration(config.videoSeconds);
     const watermark = boolConfig(config.videoWatermark, false);
     const audioGenerationEnabled = supportsVideoAudioGeneration(model);
-    const generateAudio = boolConfig(config.videoGenerateAudio, false);
+    const generateAudio = resolveVideoAudioPreference(modelName || config.model || config.videoModel, config.videoGenerateAudio, config.videoGenerateAudioByModel, config.videoGenerateAudioExplicit);
 
     return (
         <ImageSettingsTheme theme={theme}>

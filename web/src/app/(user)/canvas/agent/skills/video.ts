@@ -31,7 +31,10 @@ export const VIDEO_SKILL = String.raw`
 - sourceNodeIds：文本作者来源及真实图片、视频、音频参考；同时建立来源连线。
 - size：默认读取当前画布 Agent videoSize；只有用户明确本次覆盖时传入。不得使用图片 imageSize。
 - seconds：必须来自用户明确选择、镜头规划或全局 videoSeconds，并通过当前模型校验。
-- generateAudio：视频文件是否直接生成声音；只有当前模型支持时可为 true。
+- generateAudio：视频文件是否直接生成声音；只有当前模型支持时可为 true。用户要求有声时，直接在本次 generate_video 传 true；无需声称只能读取设置。
+- moma-seedance-2.0 和 nm-moma-seedance-2.0 默认生成原生声音；以 get_generation_config 返回的有效值为准，不把遗留配置字段的 false 当成当前实际默认。
+- 用户问声音开关在哪里时：选中视频节点，打开该节点的视频设置，在“音频生成”中切换“是否生成与视频同步的AI音频”。这是生成参数，播放器静音按钮只控制播放；不要编造“右上角齿轮”等未经确认的入口。
+- 已生成的无声视频不会因开关变化自动补出声音；本次开关只作用于新生成。
 
 工具成功后会创建真实 video 节点并沿用现有任务、轮询和上游地址。
 

@@ -31,6 +31,7 @@ import { applyCameraPrompt } from "../utils/canvas-camera";
 import { GROUP_PADDING, findContainingGroupId, findGroupDropTarget, getNodeBounds, snapNodesIntoGroup } from "../utils/canvas-group";
 import { App, Button, Dropdown, Modal } from "antd";
 import { isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
+import { resolveVideoAudioPreference } from "@/lib/video-audio-preference";
 import { isMimoVoiceCloneModel, isMimoTtsModel, isMimoPresetTtsModel, isMimoVoiceDesignModel, normalizeMimoTtsFormat, normalizeMimoTtsVoice } from "@/lib/mimo-tts";
 import { isGlmTtsModel, normalizeAudioVoiceValue, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeGlmTtsVoice, normalizeGlmTtsFormat, normalizeGlmTtsSpeed } from "@/lib/audio-generation";
 import { isGrok2APITtsConfig, normalizeGrokTtsLanguage, normalizeGrokTtsFormat, normalizeGrokTtsSpeed } from "@/lib/grok-tts";
@@ -3375,7 +3376,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         autoGenerateMedia: resolvedAgentConfig.autoGenerateMedia,
                         imageCount: 1,
                         videoSeconds: agentEffectiveConfig.videoSeconds,
-                        videoGenerateAudio: agentEffectiveConfig.videoGenerateAudio,
+                        videoGenerateAudio: String(resolveVideoAudioPreference(videoModel, agentEffectiveConfig.videoGenerateAudio, agentEffectiveConfig.videoGenerateAudioByModel, agentEffectiveConfig.videoGenerateAudioExplicit)),
                         videoSupportsAudio: supportsVideoAudioGeneration(videoModel),
                         videoDuration: canvasAgentVideoDurationHint(videoModel),
                         audioVoice: isGeminiTtsModel(audioModel) && isGeminiConfig({ ...agentEffectiveConfig, model: audioModel }, audioModel) ? agentEffectiveConfig.geminiTtsVoice : isGlmTtsModel(audioModel) ? agentEffectiveConfig.glmTtsVoice : grokTts ? agentEffectiveConfig.grokTtsVoice : agentEffectiveConfig.audioVoice,
@@ -3610,12 +3611,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         const seconds = typeof args.seconds === "number" ? args.seconds : Number(generationConfig.videoSeconds);
                         const durationError = validateCanvasAgentVideoSeconds(generationConfig.model, seconds);
                         if (durationError) return { ok: false, code: "unsupported_duration", message: durationError, supported: canvasAgentVideoDurationHint(generationConfig.model) };
-                        const generateAudio = typeof args.generateAudio === "boolean" ? args.generateAudio : generationConfig.videoGenerateAudio === "true";
+                        const generateAudio = typeof args.generateAudio === "boolean" ? args.generateAudio : resolveVideoAudioPreference(generationConfig.model, generationConfig.videoGenerateAudio, generationConfig.videoGenerateAudioByModel, generationConfig.videoGenerateAudioExplicit);
                         if (generateAudio && !supportsVideoAudioGeneration(generationConfig.model)) {
                             return { ok: false, code: "video_audio_not_supported", message: "当前全局视频模型不支持视频原生声音" };
                         }
                         metadata.seconds = String(seconds);
-                        metadata.generateAudio = String(generateAudio);
+                        metadata.generateAudio = String(generateAudio); metadata.generateAudioExplicit = typeof args.generateAudio === "boolean";
                     }
                     if (mode === "audio") {
                         if (isGeminiTtsModel(generationConfig.model) && isGeminiConfig(generationConfig, generationConfig.model)) {
@@ -5511,7 +5512,7 @@ function applyCanvasVideoTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
             vquality: node.metadata?.vquality || config.vquality,
             mode: node.metadata?.mode || config.videoMode,
             negativePrompt: node.metadata?.negativePrompt || config.videoNegativePrompt,
-            generateAudio: node.metadata?.generateAudio || config.videoGenerateAudio,
+            generateAudio: node.metadata?.generateAudio ?? config.videoGenerateAudio,
             characterOrientation: node.metadata?.characterOrientation || config.videoCharacterOrientation,
             watermark: node.metadata?.watermark || config.videoWatermark,
             startedAt: taskStartedAt,
@@ -5811,7 +5812,8 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         videoNegativePrompt: node?.metadata?.negativePrompt || config.videoNegativePrompt || defaultConfig.videoNegativePrompt,
         videoMultiShot: node?.metadata?.multiShot || config.videoMultiShot || defaultConfig.videoMultiShot,
         videoShotType: node?.metadata?.shotType || config.videoShotType || defaultConfig.videoShotType,
-        videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
+        videoGenerateAudio: node?.metadata?.generateAudio ?? config.videoGenerateAudio ?? defaultConfig.videoGenerateAudio,
+        videoGenerateAudioExplicit: node?.metadata?.generateAudioExplicit === true ? node.metadata.generateAudio === "true" : undefined,
         videoCharacterOrientation: node?.metadata?.characterOrientation || config.videoCharacterOrientation || defaultConfig.videoCharacterOrientation,
         videoWatermark: node?.metadata?.watermark || config.videoWatermark || defaultConfig.videoWatermark,
         audioVoice: node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice,

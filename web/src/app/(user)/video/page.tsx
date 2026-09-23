@@ -21,6 +21,7 @@ import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { isMiniMaxH3Config } from "@/lib/minimax-video";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { COGVIDEOX3_DURATIONS, isAgnesVideoV25Model, isCogVideoX3Model, modelKey, normalizeCogVideoX3Duration, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
+import { resolveVideoAudioPreference } from "@/lib/video-audio-preference";
 import { deleteStoredMedia, downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { deleteVideoGenerationLogs, fetchVideoGenerationLogs, saveVideoGenerationLogs } from "@/services/api/generation-logs";
@@ -32,6 +33,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { useWalletStore } from "@/stores/use-wallet-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { captureSessionIdentity, isSessionIdentityCurrent, type SessionIdentity } from "@/lib/session-identity";
 
 const cogVideoX3DurationOptions = COGVIDEOX3_DURATIONS.map((value) => ({ value, label: `${value}s` }));
 
@@ -137,6 +139,8 @@ export default function VideoPage() {
     const addAsset = useAssetStore((state) => state.addAsset);
     const token = useUserStore((state) => state.token);
     const isUserReady = useUserStore((state) => state.isReady);
+    const sessionRef = useRef<SessionIdentity>(captureSessionIdentity());
+    const sessionCurrent = () => isSessionIdentityCurrent(sessionRef.current);
     const [prompt, setPrompt] = useState("");
     const [negativePrompt, setNegativePrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
@@ -972,11 +976,16 @@ export default function VideoPage() {
     };
 
     const loadAccountVideoHistory = async (currentToken: string) => {
+        const session = sessionRef.current;
+        if (!sessionCurrent()) return undefined;
         try {
-            const localLogs = await readStoredLogs();
+            const localLogs = await readStoredLogs(session.userId);
             const remoteLogs = await fetchVideoGenerationLogs<GenerationLog>(currentToken);
+            if (!isSessionIdentityCurrent(session)) return undefined;
             const mergedLogs = await mergeVideoLogs(remoteLogs, localLogs);
-            await replaceStoredVideoHistory(mergedLogs);
+            if (!isSessionIdentityCurrent(session)) return undefined;
+            await replaceStoredVideoHistory(mergedLogs, session.userId);
+            if (!isSessionIdentityCurrent(session)) return undefined;
             setLogs(mergedLogs);
             return mergedLogs;
         } catch {
@@ -991,7 +1000,10 @@ export default function VideoPage() {
     };
 
     const saveGenerationLog = async (log: GenerationLog) => {
-        await getVideoLogStore().setItem(log.id, serializeLog(log));
+        const session = sessionRef.current;
+        if (!sessionCurrent()) return;
+        await getVideoLogStore(session.userId).setItem(log.id, serializeLog(log));
+        if (!isSessionIdentityCurrent(session)) return;
         setLogs((value) => sortVideoLogs([log, ...value.filter((item) => item.id !== log.id)]));
     };
 
@@ -1421,7 +1433,7 @@ function WorkbenchPanel({
     const frameReferencesEnabled = supportsVideoFrameReferences(model, channelProtocolForConfig({ ...config, model }));
     const cogVideoX3 = isCogVideoX3Model(model);
     const audioGenerationEnabled = supportsVideoAudioGeneration(model);
-    const generateAudio = boolConfig(config.videoGenerateAudio, false);
+    const generateAudio = resolveVideoAudioPreference(model, config.videoGenerateAudio, config.videoGenerateAudioByModel);
     const klingBottomConfig = resolveKlingWorkbenchConfig(config, model);
     const klingBottomVariant = klingBottomConfig?.variant || "";
     const klingBottomProvider = klingBottomConfig?.provider || "apimart";
@@ -1492,7 +1504,7 @@ function WorkbenchPanel({
                                     <QuickSelect label="清晰度" value={normalizeVideoResolutionValue(config.vquality)} options={isSeedanceVideoConfig(config) ? videoResolutionOptions.slice(0, 3) : videoResolutionOptions} onChange={(value) => { updateConfig("vquality", value); updateConfig("size", videoSizeForResolution(value, config.size)); }} />
                                     <QuickSelect label="尺寸" value={videoSizeForResolution(config.vquality, config.size)} options={videoSizeOptions(config.vquality)} onChange={(value) => updateConfig("size", value)} />
                                     {cogVideoX3 ? <QuickSelect label="秒数" value={normalizeCogVideoX3Duration(config.videoSeconds)} options={cogVideoX3DurationOptions} onChange={(value) => updateConfig("videoSeconds", value)} /> : <QuickNumber label="秒数" value={normalizeVideoSeconds(config.videoSeconds)} min={1} max={30} onChange={(value) => updateConfig("videoSeconds", value)} />}
-                                    {audioGenerationEnabled ? <QuickSwitch label="生成音频" checked={generateAudio} onChange={(checked) => updateConfig("videoGenerateAudio", String(checked))} /> : null}
+                                    {audioGenerationEnabled ? <QuickSwitch label="生成音频" checked={generateAudio} onChange={(checked) => { updateConfig("videoGenerateAudioByModel", { ...(config.videoGenerateAudioByModel || {}), [model.trim().toLowerCase().replace(/[._/]+/g, "-")]: checked }); updateConfig("videoGenerateAudio", String(checked)); }} /> : null}
                                     {motionControl ? <QuickSelect label="角色朝向参考" value={normalizeCharacterOrientation(config.videoCharacterOrientation)} options={characterOrientationOptions} onChange={(value) => updateConfig("videoCharacterOrientation", value)} /> : null}
                                 </>
                             )}
@@ -1831,7 +1843,10 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
             <WorkbenchSection title="模型">
                 <ModelPicker config={config} value={model} channelId={config.videoChannelId} onChange={(value, channelId) => { updateConfig("videoModel", value); if (channelId) updateConfig("videoChannelId", channelId); }} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </WorkbenchSection>
-            <VideoSettingsPanel config={config} modelName={model} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-3" />
+            <VideoSettingsPanel config={config} modelName={model} onConfigChange={(key, value) => {
+                if (key === "videoGenerateAudio") useConfigStore.getState().setVideoAudioPreference(model, value === "true");
+                updateConfig(key, value);
+            }} theme={theme} showTitle={false} className="space-y-3" />
         </div>
     );
 }
@@ -2180,22 +2195,24 @@ function formatLogTime(value: number) {
     return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
 
-async function replaceStoredVideoHistory(logs: GenerationLog[]) {
+async function replaceStoredVideoHistory(logs: GenerationLog[], userId?: string) {
     if (typeof window === "undefined") return;
-    await persistStoredVideoLogs(logs);
+    await persistStoredVideoLogs(logs, userId);
     const keepIds = new Set(logs.map((log) => log.id));
-    const storedKeys = await getVideoLogStore().keys();
-    await Promise.all(storedKeys.filter((key) => !keepIds.has(key)).map((key) => getVideoLogStore().removeItem(key)));
+    const store = getVideoLogStore(userId);
+    const storedKeys = await store.keys();
+    await Promise.all(storedKeys.filter((key) => !keepIds.has(key)).map((key) => store.removeItem(key)));
 }
 
-async function persistStoredVideoLogs(logs: GenerationLog[]) {
+async function persistStoredVideoLogs(logs: GenerationLog[], userId?: string) {
     if (typeof window === "undefined" || !logs.length) return;
     await Promise.all(
         logs.map(async (log) => {
             const serialized = serializeLog(log);
-            const current = await getVideoLogStore().getItem<GenerationLog>(log.id);
+            const store = getVideoLogStore(userId);
+            const current = await store.getItem<GenerationLog>(log.id);
             if (current && JSON.stringify(current) === JSON.stringify(serialized)) return;
-            await getVideoLogStore().setItem(log.id, serialized);
+            await store.setItem(log.id, serialized);
         }),
     );
 }
@@ -2611,11 +2628,11 @@ function errorDetail(error: unknown) {
     }
 }
 
-async function readStoredLogs() {
+async function readStoredLogs(userId?: string) {
     if (typeof window === "undefined") return [];
     try {
         const logs: GenerationLog[] = [];
-        await getVideoLogStore().iterate<GenerationLog, void>((value) => {
+        await getVideoLogStore(userId).iterate<GenerationLog, void>((value) => {
             logs.push(value);
         });
         return (await normalizeLogsSafely(logs)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -2871,7 +2888,7 @@ function buildVideoConfig(config: AiConfig, model: string): AiConfig {
         videoMultiPrompt: klingV3 ? normalizeKlingMultiPrompts(config.videoMultiPrompt) : defaultKlingMultiPrompts(),
         videoElementList: klingV3 && kieKlingOmni !== "transformation" ? normalizeKlingElementList(config.videoElementList) : defaultKlingElementList(),
         vquality: normalizeResolution(config.vquality),
-        videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, false) && (!klingV26 || videoMode === "pro")),
+        videoGenerateAudio: String(resolveVideoAudioPreference(model, config.videoGenerateAudio, config.videoGenerateAudioByModel) && (!klingV26 || videoMode === "pro")),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),
         videoCharacterOrientation: normalizeCharacterOrientation(config.videoCharacterOrientation),
     };

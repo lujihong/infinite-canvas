@@ -7,6 +7,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
+import { canPersistSessionData, captureSessionIdentity, isSessionIdentityCurrent } from "@/lib/session-identity";
 
 export type LocalModelChannel = {
     id: string;
@@ -54,6 +55,8 @@ export type AiConfig = {
     videoElementList: VideoElementItem[];
     vquality: string;
     videoGenerateAudio: string;
+    videoGenerateAudioByModel?: Record<string, boolean>;
+    videoGenerateAudioExplicit?: boolean;
     videoWatermark: string;
     videoCharacterOrientation: string;
     systemPrompt: string;
@@ -127,6 +130,7 @@ export const defaultConfig: AiConfig = {
     videoElementList: [{ name: "", description: "", references: [] }],
     vquality: "720",
     videoGenerateAudio: "false",
+    videoGenerateAudioByModel: {},
     videoWatermark: "false",
     videoCharacterOrientation: "video",
     systemPrompt: "",
@@ -171,6 +175,7 @@ type ConfigStore = {
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    setVideoAudioPreference: (model: string, enabled: boolean) => void;
     loadPublicSettings: () => Promise<void>;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
@@ -460,6 +465,11 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
+            setVideoAudioPreference: (model, enabled) =>
+                set((state) => {
+                    const key = model.trim().toLowerCase().replace(/[._/]+/g, "-");
+                    return { config: { ...state.config, videoGenerateAudioByModel: { ...(state.config.videoGenerateAudioByModel || {}), [key]: enabled } } };
+                }),
             loadPublicSettings: async () => {
                 if (get().isPublicSettingsLoading) return;
                 set({ isPublicSettingsLoading: true });
@@ -475,9 +485,11 @@ export const useConfigStore = create<ConfigStore>()(
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
             loadUserConfig: (userId) => {
                 if (typeof window === "undefined") return;
+                const identity = captureSessionIdentity();
                 const targetUserId = userId || useUserStore.getState().user?.id || "guest";
                 const scopedKey = `${CONFIG_STORE_KEY}:${targetUserId}`;
                 const raw = window.localStorage.getItem(scopedKey);
+                if (!isSessionIdentityCurrent(identity) || targetUserId !== (identity.userId || "guest")) return;
                 if (raw) {
                     try {
                         const parsed = JSON.parse(raw);
@@ -504,20 +516,17 @@ export const useConfigStore = create<ConfigStore>()(
             storage: createJSONStorage(() => ({
                 getItem: (key) => {
                     if (typeof window === "undefined") return null;
-                    const user = useUserStore.getState().user;
-                    const scopedKey = `${key}:${user?.id || "guest"}`;
+                    const scopedKey = `${key}:${captureSessionIdentity().userId || "guest"}`;
                     return window.localStorage.getItem(scopedKey);
                 },
                 setItem: (key, value) => {
-                    if (typeof window === "undefined") return;
-                    const user = useUserStore.getState().user;
-                    const scopedKey = `${key}:${user?.id || "guest"}`;
+                    if (typeof window === "undefined" || !canPersistSessionData()) return;
+                    const scopedKey = `${key}:${captureSessionIdentity().userId || "guest"}`;
                     window.localStorage.setItem(scopedKey, value);
                 },
                 removeItem: (key) => {
-                    if (typeof window === "undefined") return;
-                    const user = useUserStore.getState().user;
-                    const scopedKey = `${key}:${user?.id || "guest"}`;
+                    if (typeof window === "undefined" || !canPersistSessionData()) return;
+                    const scopedKey = `${key}:${captureSessionIdentity().userId || "guest"}`;
                     window.localStorage.removeItem(scopedKey);
                 },
             })),

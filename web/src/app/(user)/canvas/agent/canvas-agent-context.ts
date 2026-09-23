@@ -2,6 +2,7 @@ import { isGlmTtsModel } from "@/lib/audio-generation";
 import { isGrok2APITtsConfig } from "@/lib/grok-tts";
 import { isGeminiConfig, isGeminiTtsModel } from "@/lib/gemini";
 import { supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
+import { resolveVideoAudioPreference } from "@/lib/video-audio-preference";
 import type { AiConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasAgentState, type CanvasConnection, type CanvasNodeData } from "../types";
 
@@ -126,7 +127,7 @@ export function buildCanvasAgentContext(input: BuildCanvasAgentContextInput): Ca
             videoSize: input.config.videoSize,
             imageCount: input.config.canvasImageCount || input.config.count,
             videoSeconds: input.config.videoSeconds,
-            videoGenerateAudio: input.config.videoGenerateAudio,
+            videoGenerateAudio: String(resolveVideoAudioPreference(videoModel, input.config.videoGenerateAudio, input.config.videoGenerateAudioByModel, input.config.videoGenerateAudioExplicit)),
             videoSupportsAudio: supportsVideoAudioGeneration(videoModel),
             audioVoice: isGeminiTtsModel(audioModel) && isGeminiConfig({ ...input.config, model: audioModel }, audioModel) ? input.config.geminiTtsVoice : isGlmTtsModel(audioModel) ? input.config.glmTtsVoice : grokTts ? input.config.grokTtsVoice : input.config.audioVoice,
             audioLanguage: grokTts ? input.config.grokTtsLanguage : "",
