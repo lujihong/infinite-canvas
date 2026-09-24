@@ -274,6 +274,8 @@ func syncNewAPIUserToLocal(newApiID int, username, email, password string, role 
 	}
 	extraBytes, _ := json.Marshal(extraObj)
 
+	_, quotaPerUnit := getNewAPISystemStatus()
+	credits := localCreditsFromQuota(quota, quotaPerUnit)
 	if !ok {
 		user = model.User{
 			ID:          newID("user"),
@@ -282,7 +284,7 @@ func syncNewAPIUserToLocal(newApiID int, username, email, password string, role 
 			Email:       email,
 			DisplayName: username,
 			Role:        userRole,
-			Credits:     int(quota),
+			Credits:     credits,
 			AffCode:     newAffCode(),
 			Status:      model.UserStatusActive,
 			Extra:       string(extraBytes),
@@ -297,7 +299,7 @@ func syncNewAPIUserToLocal(newApiID int, username, email, password string, role 
 			user.Email = email
 		}
 		user.Role = userRole
-		user.Credits = int(quota)
+		user.Credits = credits
 		user.Extra = string(extraBytes)
 		user.UpdatedAt = now()
 	}
@@ -594,6 +596,17 @@ func fetchNewAPIWalletBalance(base, token string) (map[string]any, error) {
 
 // quotaBillingValues converts the platform quota ledger into CNY account value.
 // This is the current platform top-up convention, not a generic USD exchange rate.
+func localCreditsFromQuota(quota, quotaPerUnit int64) int {
+	if quota <= 0 || quotaPerUnit <= 0 {
+		return 0
+	}
+	points := float64(quota) / float64(quotaPerUnit) * 10
+	if points <= 0 || points > float64(^uint(0)>>1) {
+		return 0
+	}
+	return int(points)
+}
+
 func quotaBillingValues(quota, quotaPerUnit int64) (yuan, points float64) {
 	if quotaPerUnit <= 0 {
 		quotaPerUnit = 500000
