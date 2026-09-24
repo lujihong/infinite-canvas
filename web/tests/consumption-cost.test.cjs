@@ -23,9 +23,9 @@ test('tiny debit remains charged and pending makes no no-charge promise',()=>{
  assert.equal(show({type:2,status:'success',points_cost:0.00002,formatted_money:'¥ 0.000002'}).amount,'-0.00002 积分');
  assert.equal(show({type:2,status:'processing'}).detail,'生成中，最终费用尚未结算');
 });
-test('difference charge is labeled in points without money conversion',()=>{
- const result=show({type:2,status_label:'差额补扣',points_cost:0.60592,formatted_points:'0.61 积分',formatted_money:'¥ 0.0606'});
- assert.equal(result.amount,'-0.60592 积分');assert.equal(result.detail,'差额补扣');
+test('difference charge explains pre-consume and final actual amount',()=>{
+ const result=show({type:2,status_label:'差额补扣',points_cost:0.60592,pre_consumed_points:39.744,actual_points:40.34992,formatted_points:'0.61 积分',formatted_money:'¥ 0.0606'});
+ assert.equal(result.amount,'-0.60592 积分');assert.match(result.detail,/预扣 39.744 积分/);assert.match(result.detail,/最终应扣 40.34992 积分/);assert.match(result.detail,/本次补扣 0.60592 积分/);
 });
 test('missing or invalid points never claim free even when quota or status says zero',()=>{
  for(const points_cost of [undefined,null,NaN,Infinity,-1,'0']) {

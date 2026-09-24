@@ -791,6 +791,10 @@ type ConsumptionLogItem struct {
 	Quota             int64   `json:"quota"`
 	PointsCost        float64 `json:"points_cost"`
 	FormattedPoints   string  `json:"formatted_points"`
+	PreConsumedQuota  int64   `json:"pre_consumed_quota,omitempty"`
+	ActualQuota       int64   `json:"actual_quota,omitempty"`
+	PreConsumedPoints float64 `json:"pre_consumed_points,omitempty"`
+	ActualPoints      float64 `json:"actual_points,omitempty"`
 	MoneyYuan         float64 `json:"money_yuan"`
 	FormattedMoney    string  `json:"formatted_money"`
 	PromptTokens      int     `json:"prompt_tokens"`
@@ -1000,9 +1004,10 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 		// 解析关联任务信息
 		var taskID string
 		var videoURL string
-		var otherReason string
-		var preConsumedQuota int
-		if l.Other != "" {
+			var otherReason string
+			var preConsumedQuota int
+			var actualQuota int
+			if l.Other != "" {
 			var otherData struct {
 				TaskID           string `json:"task_id"`
 				Reason           string `json:"reason"`
@@ -1016,9 +1021,10 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 				if otherData.Reason != "" {
 					otherReason = otherData.Reason
 				}
-				preConsumedQuota = otherData.PreConsumedQuota
+					preConsumedQuota = otherData.PreConsumedQuota
+					actualQuota = otherData.ActualQuota
+				}
 			}
-		}
 
 		lowerModel := strings.ToLower(l.ModelName)
 		isVideo := strings.Contains(lowerModel, "video") ||
@@ -1079,9 +1085,17 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 		progress := 100
 		errMsg := ""
 		errDetail := ""
-		formattedPoints := formatBillingPoints(pointsCost)
+			formattedPoints := formatBillingPoints(pointsCost)
+			prePoints := 0.0
+			actualPoints := 0.0
+			if preConsumedQuota > 0 {
+				_, prePoints = quotaBillingValues(int64(preConsumedQuota), quotaPerUnit)
+			}
+			if actualQuota > 0 {
+				_, actualPoints = quotaBillingValues(int64(actualQuota), quotaPerUnit)
+			}
 
-		if l.Type == 5 {
+			if l.Type == 5 {
 			// Type 5: failed; preserve charged quota when present.
 			status = "failed"
 			statusLabel = consumptionStatusLabel(l.Type, l.Quota, "")
@@ -1142,9 +1156,13 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 			TaskID:            taskID,
 			TaskAction:        taskAction,
 			VideoURL:          videoURL,
-			Quota:             l.Quota,
-			PointsCost:        pointsCost,
-			FormattedPoints:   formattedPoints,
+				Quota:             l.Quota,
+				PointsCost:        pointsCost,
+				FormattedPoints:   formattedPoints,
+				PreConsumedQuota:  int64(preConsumedQuota),
+				ActualQuota:       int64(actualQuota),
+				PreConsumedPoints: prePoints,
+				ActualPoints:      actualPoints,
 			MoneyYuan:         moneyYuan,
 			FormattedMoney:    formatBillingMoney(moneyYuan),
 			PromptTokens:      l.PromptTokens,

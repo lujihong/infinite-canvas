@@ -94,6 +94,10 @@ export type ConsumptionLogItem = {
     quota: number;
     points_cost: number;
     formatted_points: string;
+    pre_consumed_quota?: number;
+    actual_quota?: number;
+    pre_consumed_points?: number;
+    actual_points?: number;
     money_yuan: number;
     formatted_money: string;
     prompt_tokens: number;
