@@ -58,8 +58,12 @@ func QuoteCreativeWorkflowDraft(ctx context.Context, request WorkflowAgentDraftQ
 		}
 	}
 	// Validate the same server-side channel selection without inspecting or exposing its credentials.
-	if _, err := workflowDraftChannel(WorkflowAgentDraftRequest{Model: modelName, ChannelMode: request.ChannelMode, ChannelID: request.ChannelID}, modelName); err != nil {
+	channel, err := workflowDraftChannel(user, WorkflowAgentDraftRequest{Model: modelName, ChannelMode: request.ChannelMode, ChannelID: request.ChannelID}, modelName)
+	if err != nil {
 		return WorkflowAgentDraftQuote{}, err
+	}
+	if channel.ID == "xyb-official-exclusive" {
+		return WorkflowAgentDraftQuote{Model: modelName, Points: 0, Source: "newapi_wallet", Unit: "upstream", Message: "使用个人专属中转站额度，本站不重复扣积分"}, nil
 	}
 	points, err := ModelCost(modelName)
 	if err != nil {
@@ -86,13 +90,13 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 	if request.ChannelMode != "local" && !UserCanUseRemoteModelChannel(user) {
 		return WorkflowAgentDraftResponse{}, safeMessageError{message: "当前账号未开放云端渠道"}
 	}
-	channel, err := workflowDraftChannel(request, modelName)
+	channel, err := workflowDraftChannel(user, request, modelName)
 	if err != nil {
 		return WorkflowAgentDraftResponse{}, err
 	}
 
 	credits, _ := ModelCost(modelName)
-	chargedCredits := request.ChannelMode != "local"
+	chargedCredits := request.ChannelMode != "local" && channel.ID != "xyb-official-exclusive"
 	if chargedCredits {
 		if err := ConsumeUserCredits(user.ID, modelName, credits, "/workflows/agent-draft"); err != nil {
 			return WorkflowAgentDraftResponse{}, err
@@ -244,7 +248,7 @@ func workflowDraftModel(modelName string) (string, error) {
 	return "", safeMessageError{message: "请先配置文本模型"}
 }
 
-func workflowDraftChannel(request WorkflowAgentDraftRequest, modelName string) (model.ModelChannel, error) {
+func workflowDraftChannel(user model.AuthUser, request WorkflowAgentDraftRequest, modelName string) (model.ModelChannel, error) {
 	if request.ChannelMode == "local" {
 		channel := model.ModelChannel{
 			ID:       strings.TrimSpace(request.ChannelID),
@@ -259,6 +263,9 @@ func workflowDraftChannel(request WorkflowAgentDraftRequest, modelName string) (
 		if channel.BaseURL == "" || channel.APIKey == "" {
 			return model.ModelChannel{}, safeMessageError{message: "文本模型本地直连渠道配置不完整"}
 		}
+		return channel, nil
+	}
+	if channel, err := AICCVideoChannel(user.ID); err == nil {
 		return channel, nil
 	}
 	return SelectModelChannel(modelName)
