@@ -233,11 +233,12 @@ test('group and asset pagination have explicit spacing and aligned page labels',
         for (const label of ['人物素材组分页', '人物素材分页']) {
             const nav = document.querySelector(`nav[aria-label="${label}"]`);
             assert.ok(nav);
-            assert.equal(nav.style.gap, '12px');
-            assert.ok(parseInt(nav.style.marginTop, 10) >= 12);
             assert.ok(nav.className.includes('items-center'));
-            assert.equal(nav.querySelector('span').style.minWidth, '68px');
+            assert.ok(nav.className.includes('justify-between'));
+            assert.ok(nav.className.includes('gap-2'));
             assert.equal(nav.querySelectorAll('button').length, 2);
+            const pageText = nav.textContent || '';
+            assert.match(pageText, /第 1 页/);
         }
     } finally { await h.cleanup(); }
 });

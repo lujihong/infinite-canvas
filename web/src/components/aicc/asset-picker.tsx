@@ -96,81 +96,51 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         else if (asset.assetType === "Audio") onInsert({...base, kind:"audio", url:preview, mimeType:"audio/mpeg"});
     };
     return <div className="space-y-4 text-sm">
-        {channelsQuery.isPending ? <Spin /> : channelsQuery.isError ? <Alert type="error" message={errorText(channelsQuery.error)} action={<Button onClick={() => void channelsQuery.refetch()}>重试渠道加载</Button>} /> : !channels.length ? <Empty description="暂无可用的移动云素材渠道" /> : !channelReady ? <Alert type="info" message="请选择素材所属的移动云渠道" /> : null}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-                {(["LivenessFace","AIGC"] as const).map(value => <Button key={value} type={type === value ? "primary" : "default"} onClick={() => {setType(value);setSelected(null);setGroupPage(1);setAssetPage(1);}}>{value === "LivenessFace" ? "真人肖像" : "虚拟人物"}</Button>)}
-                {channels.length > 1 ? (
-                    <div className="flex items-center gap-1.5 ml-1">
-                        <span className="text-xs text-stone-500">移动云专线:</span>
-                        <Select
-                            size="small"
-                            className="w-48"
-                            value={activeChannelId}
-                            options={channels.map((c) => ({ value: c.id, label: `${c.name} (${c.region || "专线"})` }))}
-                            onChange={(val) => {
-                                setSelectedChannelId(val);
-                                setSelected(null);
-                                setGroupPage(1);
-                                setAssetPage(1);
-                            }}
-                        />
-                    </div>
-                ) : channels[0] ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-stone-500 ml-1">
-                        <Radio className="size-3 text-emerald-500" />
-                        接入专线: <strong className="text-stone-700 dark:text-stone-300 font-medium">{channels[0].name}</strong>
-                    </span>
-                ) : null}
-            </div>
-            <Button disabled={!channelReady} loading={busy} onClick={() => void begin()}>
-                {channels.length > 1 && activeChannel ? `在「${activeChannel.name}」发起认证` : "发起真人认证"}
-            </Button>
+        <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/45">
+            {channelsQuery.isPending ? <div className="flex min-h-9 items-center gap-2 text-xs text-stone-500"><Spin size="small" />正在加载可用素材渠道…</div> : channelsQuery.isError ? <Alert type="error" message={errorText(channelsQuery.error)} action={<Button size="small" onClick={() => void channelsQuery.refetch()}>重试渠道加载</Button>} /> : !channels.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可用的移动云素材渠道" /> : !channelReady ? <Alert type="info" showIcon message="请选择素材所属的移动云渠道" /> : <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400"><Radio className="size-3.5 text-emerald-500" /><span>素材渠道已就绪</span></div>}
         </div>
-        <p className="text-xs text-stone-500 dark:text-stone-400">素材来自移动云，仅展示当前账号有权访问的素材。选用后自动带入资产引用，不需要手动复制 ID。</p>
+        <div className="grid gap-3 rounded-xl border border-stone-200 p-3 dark:border-stone-800 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <div className="min-w-0 space-y-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-stone-500 dark:text-stone-400">素材类型</div>
+                <div className="flex w-full rounded-lg bg-stone-100 p-1 dark:bg-stone-900">
+                    {(["LivenessFace","AIGC"] as const).map(value => <Button key={value} type={type === value ? "primary" : "text"} className="min-w-0 flex-1 !rounded-md" onClick={() => {setType(value);setSelected(null);setGroupPage(1);setAssetPage(1);}}>{value === "LivenessFace" ? "真人肖像" : "虚拟人物"}</Button>)}
+                </div>
+                {channels.length > 1 ? <div className="grid gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center"><span className="text-xs text-stone-500 dark:text-stone-400">素材所属渠道</span><Select size="middle" className="w-full" value={activeChannelId} options={channels.map((c) => ({ value: c.id, label: `${c.name}（${c.region || "专线"}）` }))} onChange={(val) => {setSelectedChannelId(val);setSelected(null);setGroupPage(1);setAssetPage(1);}} /></div> : channels[0] ? <div className="flex min-w-0 items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400"><Radio className="size-3 text-emerald-500" />接入专线：<strong className="truncate font-medium text-stone-700 dark:text-stone-300">{channels[0].name}</strong></div> : null}
+            </div>
+            <Button className="w-full sm:w-auto" disabled={!channelReady} loading={busy} onClick={() => void begin()}>{channels.length > 1 && activeChannel ? `在「${activeChannel.name}」发起认证` : "发起真人认证"}</Button>
+        </div>
+        <div className="grid gap-2 rounded-lg border border-dashed border-stone-200 px-3 py-2.5 text-xs leading-5 text-stone-500 dark:border-stone-800 dark:text-stone-400">
+            <p>素材来自移动云，仅展示当前账号有权访问的素材。选用后会自动带入资产引用，不需要手动复制 ID。</p>
+            <p>认证成功后，可在同一人物组继续添加本人的素材；移动云会进行同人一致性与最终入库校验，认证或上传成功不保证素材入库成功。</p>
+        </div>
         {!selectionEnabled && <Alert type="info" showIcon message="当前模型不支持移动云素材。请先选择支持的 Seedance 模型，再选用素材。" />}
-        <p className="text-xs text-stone-500 dark:text-stone-400">真人认证成功后，可在同一人物组继续添加本人的素材；移动云会进行同人一致性与最终入库校验，认证或上传成功不保证素材入库成功。</p>
         {failure && <Alert type="error" showIcon message={failure} />}
-        {session && <section className="flex flex-wrap items-center gap-4 rounded-lg border border-stone-200 p-4 dark:border-stone-700">
-            <QRCode value={session.h5Link} size={144} status={seconds ? "active" : "expired"} onRefresh={() => void begin()} />
-            <div className="min-w-0 flex-1 space-y-2"><p className="font-medium">用手机完成活体核验与肖像授权</p><p className="text-xs">{seconds ? `链接剩余 ${Math.floor(seconds/60)}分${seconds%60}秒` : "链接已过期，请重新发起"}</p><div className="flex flex-wrap gap-2"><Button disabled={!seconds} href={session.h5Link} target="_blank" rel="noopener noreferrer">手机端打开链接</Button><Button disabled={!seconds} onClick={() => {void navigator.clipboard.writeText(session.h5Link).then(() => message.success("已复制"), () => message.error("复制失败"));}}>复制链接</Button><Button loading={busy} disabled={!seconds} onClick={() => void check()}>查询认证结果</Button></div></div>
+        {session && <section className="grid gap-4 rounded-xl border border-stone-200 bg-stone-50/60 p-4 dark:border-stone-700 dark:bg-stone-900/40 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+            <div className="mx-auto sm:mx-0"><QRCode value={session.h5Link} size={144} status={seconds ? "active" : "expired"} onRefresh={() => void begin()} /></div>
+            <div className="min-w-0 space-y-2"><p className="font-medium">用手机完成活体核验与肖像授权</p><p className="text-xs text-stone-500 dark:text-stone-400">{seconds ? `链接剩余 ${Math.floor(seconds/60)}分${seconds%60}秒` : "链接已过期，请重新发起"}</p><div className="flex flex-wrap gap-2"><Button disabled={!seconds} href={session.h5Link} target="_blank" rel="noopener noreferrer">手机端打开链接</Button><Button disabled={!seconds} onClick={() => {void navigator.clipboard.writeText(session.h5Link).then(() => message.success("已复制"), () => message.error("复制失败"));}}>复制链接</Button><Button loading={busy} disabled={!seconds} onClick={() => void check()}>查询认证结果</Button></div></div>
         </section>}
-        {channelReady && type === "AIGC" && <div className="flex gap-2"><Input aria-label="新素材组名称" placeholder="虚拟人物组名称" maxLength={64} value={groupName} onChange={e=>setGroupName(e.target.value)} /><Button disabled={!groupName.trim() || busy} onClick={() => void mutate(()=>aiccCreateGroup(groupName.trim(), activeChannelId),"素材组已创建")}>新建组</Button></div>}
-        {groups.isError ? <Alert type="error" message={errorText(groups.error)} action={<Button onClick={()=>void groups.refetch()}>重试</Button>} /> : groups.isLoading ? <Spin /> : <>
+        {channelReady && type === "AIGC" && <div className="grid gap-2 rounded-xl border border-stone-200 p-3 dark:border-stone-800 sm:grid-cols-[minmax(0,1fr)_auto]"><Input aria-label="新素材组名称" placeholder="虚拟人物组名称" maxLength={64} value={groupName} onChange={e=>setGroupName(e.target.value)} /><Button disabled={!groupName.trim() || busy} onClick={() => void mutate(()=>aiccCreateGroup(groupName.trim(), activeChannelId),"素材组已创建")}>新建组</Button></div>}
+        {groups.isError ? <Alert type="error" message={errorText(groups.error)} action={<Button onClick={()=>void groups.refetch()}>重试</Button>} /> : groups.isLoading ? <Spin /> : <div className="space-y-2">
+            <div className="text-xs font-medium text-stone-500 dark:text-stone-400">素材组</div>
             <Select className="w-full" aria-label="选择人物素材组" placeholder="选择素材组" value={group?.groupId} options={groups.data?.data.map(item=>({value:item.groupId,label:item.groupName || item.groupId}))} onChange={id=>{setSelected(groups.data?.data.find(item=>item.groupId===id)||null);setAssetPage(1);}} />
-            <nav aria-label="人物素材组分页" className="flex flex-wrap items-center justify-end" style={{ marginTop: 12, gap: 12, paddingBottom: 4 }}>
-                <Button size="small" aria-label="素材组上一页" disabled={groupPage<=1 || groups.isFetching} onClick={()=>setGroupPage(p=>p-1)}>上一页</Button>
-                <span className="text-xs text-stone-500 dark:text-stone-400" style={{ minWidth: 68, textAlign: "center", whiteSpace: "nowrap" }}>第 {groupPage} 页</span>
-                <Button size="small" aria-label="素材组下一页" disabled={groups.isFetching || (groups.data?.total!==undefined ? groupPage*12>=groups.data.total : (groups.data?.data.length||0)<12)} onClick={()=>setGroupPage(p=>p+1)}>下一页</Button>
-            </nav>
-        </>}
+            <nav aria-label="人物素材组分页" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-stone-50 px-2.5 py-2 dark:bg-stone-900/60"><span className="text-xs text-stone-500 dark:text-stone-400">素材组第 {groupPage} 页</span><div className="flex items-center gap-2"><Button size="small" aria-label="素材组上一页" disabled={groupPage<=1 || groups.isFetching} onClick={()=>setGroupPage(p=>p-1)}>上一页</Button><Button size="small" aria-label="素材组下一页" disabled={groups.isFetching || (groups.data?.total!==undefined ? groupPage*12>=groups.data.total : (groups.data?.data.length||0)<12)} onClick={()=>setGroupPage(p=>p+1)}>下一页</Button></div></nav>
+        </div>}
         {channelReady && group && <>
             <AssetUploadForm key={`${activeChannelId}:${type}:${group.groupId}`} group={{...group, channelId: activeChannelId}} onSubmitted={refreshAssets} />
-            <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-stone-500">处理中每 10 秒检查，最多 12 次；页面不可见时暂停，可手动刷新。</span><Button onClick={refreshAssets}>刷新素材</Button></div>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-stone-50 px-3 py-2 dark:bg-stone-900/60"><span className="text-xs leading-5 text-stone-500 dark:text-stone-400">处理中每 10 秒检查，最多 12 次；页面不可见时暂停，可手动刷新。</span><Button size="small" onClick={refreshAssets}>刷新素材</Button></div>
             {assets.isError ? <Alert type="error" message={errorText(assets.error)} /> : assets.isLoading ? <Spin /> : !assets.data?.data.length ? <Empty description="本页暂无素材" /> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">{assets.data.data.map(asset=>{
                 const matchedChannel = Array.isArray(channels) ? channels.find(c => c.id === (asset.channelId || activeChannelId)) : undefined;
                 const channelTag = matchedChannel ? matchedChannel.name : "移动云专线";
                 return (
-                    <article key={asset.assetId} className="min-w-0 rounded-lg border border-stone-200 p-3 dark:border-stone-700">
-                        <div className="mb-2 flex aspect-video items-center justify-center overflow-hidden rounded bg-stone-100 dark:bg-stone-900">
+                    <article key={asset.assetId} className="min-w-0 overflow-hidden rounded-xl border border-stone-200 bg-background p-3 shadow-sm dark:border-stone-700">
+                        <div className="mb-3 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-stone-100 dark:bg-stone-900">
                             {asset.assetUrl && /^https?:\/\//.test(asset.assetUrl) ? asset.assetType === "Image" ? <img src={asset.assetUrl} alt={asset.assetName} loading="lazy" className="h-full w-full object-contain" /> : asset.assetType === "Video" ? <video src={asset.assetUrl} aria-label={asset.assetName} controls playsInline preload="none" className="h-full w-full object-contain" /> : <audio src={asset.assetUrl} aria-label={asset.assetName} controls preload="none" className="w-full" /> : <span className="text-xs text-stone-500">暂无预览</span>}
                         </div>
-                        <div className="flex items-center justify-between gap-2">
-                            <span className="truncate font-medium text-xs" title={asset.assetName}>{asset.assetName||"未命名素材"}</span>
-                            <div className="flex items-center gap-1 shrink-0">
-                                <Tag color="cyan" title={`专线ID: ${asset.channelId || activeChannelId}`}>{channelTag}</Tag>
-                                <Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag>
-                            </div>
-                        </div>
-                        <Button className="mt-3 w-full" type="primary" disabled={!selectionEnabled || asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button>
+                        <div className="space-y-2"><div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 truncate text-xs font-medium" title={asset.assetName}>{asset.assetName||"未命名素材"}</span><div className="flex shrink-0 flex-wrap justify-end gap-1"><Tag color="cyan" title={`专线ID: ${asset.channelId || activeChannelId}`}>{channelTag}</Tag><Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag></div></div><Button className="w-full" type="primary" disabled={!selectionEnabled || asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button></div>
                     </article>
                 );
             })}</div>}
-            <nav aria-label="人物素材分页" className="flex flex-wrap items-center justify-end border-t border-stone-200 dark:border-stone-700" style={{ marginTop: 16, paddingTop: 12, gap: 12 }}>
-                <Button size="small" aria-label="素材上一页" disabled={assetPage<=1 || assets.isFetching} onClick={()=>setAssetPage(p=>p-1)}>上一页</Button>
-                <span className="text-xs text-stone-500 dark:text-stone-400" style={{ minWidth: 68, textAlign: "center", whiteSpace: "nowrap" }}>第 {assetPage} 页</span>
-                <Button size="small" aria-label="素材下一页" disabled={assets.isFetching || (assets.data?.total!==undefined ? assetPage*12>=assets.data.total : (assets.data?.data.length||0)<12)} onClick={()=>setAssetPage(p=>p+1)}>下一页</Button>
-            </nav>
+            <nav aria-label="人物素材分页" className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-200 pt-3 dark:border-stone-700"><span className="text-xs text-stone-500 dark:text-stone-400">素材第 {assetPage} 页</span><div className="flex items-center gap-2"><Button size="small" aria-label="素材上一页" disabled={assetPage<=1 || assets.isFetching} onClick={()=>setAssetPage(p=>p-1)}>上一页</Button><Button size="small" aria-label="素材下一页" disabled={assets.isFetching || (assets.data?.total!==undefined ? assetPage*12>=assets.data.total : (assets.data?.data.length||0)<12)} onClick={()=>setAssetPage(p=>p+1)}>下一页</Button></div></nav>
         </>}
     </div>;
 }
