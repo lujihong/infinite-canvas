@@ -161,9 +161,8 @@ function LoginContent() {
                     password: values.password || "",
                 });
                 message.success("登录成功");
-                router.replace(redirect);
+                router.replace(user.role === "admin" ? redirect : "/");
                 router.refresh();
-                if (user.role !== "admin") router.replace("/");
             }
         } catch (error) {
             message.error(error instanceof Error ? error.message : "登录失败，请检查账号密码");

@@ -128,6 +128,8 @@ export function AuthModal() {
 
             form.resetFields();
             closeLoginModal();
+            // The session transition is asynchronous; explicitly close again on the next frame so a stale modal render cannot remain visible.
+            requestAnimationFrame(() => useUserStore.getState().closeLoginModal());
         } catch (error) {
             message.error(error instanceof Error ? error.message : "操作失败，请检查输入");
         }
