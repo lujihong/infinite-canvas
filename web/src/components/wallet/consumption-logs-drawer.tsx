@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Drawer, Empty, Input, Modal, Skeleton, Tag, message } from "antd";
+import { Drawer, Empty, Input, Modal, Select, Skeleton, Tag, message } from "antd";
 import {
     AlertCircle,
     CheckCircle2,
@@ -61,6 +61,7 @@ export function ConsumptionLogsDrawer({
     const [keyword, setKeyword] = useState("");
     const [category, setCategory] = useState<"all" | "image" | "video" | "audio" | "text">("all");
     const [statusFilter, setStatusFilter] = useState<"all" | "success" | "failed" | "refunded">("all");
+    const [exportRange, setExportRange] = useState<"all" | "day" | "week" | "month" | "year">("all");
     const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
     const [selectedDetailLog, setSelectedDetailLog] = useState<ConsumptionLogItem | null>(null);
 
@@ -165,6 +166,15 @@ export function ConsumptionLogsDrawer({
     // 消费分类、状态与关键词过滤
     const filteredLogs = useMemo(() => {
         let list = logs;
+        if (exportRange !== "all") {
+            const now = dayjs();
+            const start = exportRange === "day" ? now.startOf("day") : exportRange === "week" ? now.startOf("week") : exportRange === "month" ? now.startOf("month") : now.startOf("year");
+            const end = exportRange === "day" ? now.endOf("day") : exportRange === "week" ? now.endOf("week") : exportRange === "month" ? now.endOf("month") : now.endOf("year");
+            list = list.filter((item) => {
+                const timestamp = item.submit_time || item.created_at;
+                return timestamp >= start.unix() && timestamp <= end.unix();
+            });
+        }
         if (category !== "all") {
             list = list.filter((item) => {
                 const name = (item.model_name || "").toLowerCase();
@@ -198,7 +208,7 @@ export function ConsumptionLogsDrawer({
             });
         }
         return list;
-    }, [logs, category, statusFilter, keyword]);
+    }, [logs, category, statusFilter, keyword, exportRange]);
 
     // 统计总积分净消耗（消费为加，失败退款 type===6 自动核减，真实反映实际净扣费）
     const totalPointsSpent = useMemo(() => {
@@ -366,8 +376,11 @@ export function ConsumptionLogsDrawer({
                                     ))}
                                 </div>
 
-                                <div className="w-56">
-                                    <Input
+                                <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
+                                    <Select size="small" value={exportRange} onChange={setExportRange} options={[{ value: "all", label: "全部时间" }, { value: "day", label: "今天" }, { value: "week", label: "本周" }, { value: "month", label: "本月" }, { value: "year", label: "今年" }]} className="min-w-24" />
+                                    <button type="button" className="rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800" onClick={() => downloadConsumptionCsv(filteredLogs)}>导出 Excel</button>
+                                    <div className="w-56">
+                                        <Input
                                         prefix={<Search className="size-3 text-stone-400" />}
                                         placeholder="搜索任务 ID 或模型..."
                                         size="small"
@@ -376,9 +389,9 @@ export function ConsumptionLogsDrawer({
                                         onChange={(e) => setKeyword(e.target.value)}
                                         className="!rounded-lg text-xs"
                                     />
+                                    </div>
                                 </div>
                             </div>
-
                             {/* 状态快速过滤 */}
                             <div className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400 pl-0.5">
                                 <span className="text-[11px] text-stone-400">状态过滤:</span>
@@ -979,4 +992,23 @@ export function ConsumptionLogsDrawer({
             </Modal>
         </Drawer>
     );
+}
+
+function downloadConsumptionCsv(logs: ConsumptionLogItem[]) {
+    const headers = ["提交时间", "完成时间", "模型", "任务类型", "任务ID", "状态", "状态说明", "原始Quota", "积分", "预扣积分", "最终积分", "本次差额", "输入Tokens", "输出Tokens", "耗时秒", "请求ID", "上游请求ID", "错误信息"];
+    const escapeCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const rows = logs.map((log) => [
+        log.submit_time || log.created_at ? dayjs((log.submit_time || log.created_at) * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
+        log.complete_time ? dayjs(log.complete_time * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
+        log.model_name, log.task_action, log.task_id, log.status, log.status_label, log.quota, log.points_cost,
+        log.pre_consumed_points, log.actual_points, log.status_label === "差额补扣" ? log.points_cost : "",
+        log.prompt_tokens, log.completion_tokens, log.duration_seconds ?? (log.use_time / 1000), log.request_id, log.upstream_request_id, log.error_message || log.error_detail,
+    ].map(escapeCell).join(","));
+    const blob = new Blob(["\\ufeff" + [headers.map(escapeCell).join(","), ...rows].join("\\r\\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `鑫元宝消费明细-${dayjs().format("YYYYMMDD-HHmmss")}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
 }

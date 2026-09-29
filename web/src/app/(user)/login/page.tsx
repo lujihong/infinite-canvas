@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { LockOutlined, MailOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { App, Button, Form, Input, Segmented, Space } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -9,7 +9,7 @@ import { BrandLogo } from "@/components/layout/brand-logo";
 import { fetchCurrentUser, requestPasswordReset, sendEmailVerification } from "@/services/api/auth";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { captureSessionIdentity, isSessionIdentityCurrent } from "@/lib/session-identity";
+import { captureSessionIdentity, isSessionIdentityCurrent, subscribeSessionIdentity, type SessionIdentity } from "@/lib/session-identity";
 
 type AuthFormValues = {
     username?: string;
@@ -19,11 +19,28 @@ type AuthFormValues = {
     confirmPassword?: string;
 };
 
-function safeRedirect(value: string | null): string {
-    const cleaned = (value ?? "").replace(/[\t\n\r]/g, "");
-    if (!cleaned.startsWith("/") || cleaned.startsWith("//") || cleaned.startsWith("/\\")) {
+function safeRedirect(value: string | null, role: "user" | "admin" | "guest" = "user"): string {
+    let cleaned = value ?? "";
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+        try {
+            const decoded = decodeURIComponent(cleaned);
+            if (decoded === cleaned) break;
+            cleaned = decoded;
+        } catch {
+            return "/";
+        }
+    }
+    try {
+        if (decodeURIComponent(cleaned) !== cleaned) return "/";
+    } catch {
         return "/";
     }
+    if (/[\u0000-\u001f\u007f]/.test(cleaned)) return "/";
+    const pathname = cleaned.split(/[?#]/, 1)[0];
+    if (!cleaned.startsWith("/") || cleaned.startsWith("//") || cleaned.includes("\\") || pathname === "/login" || pathname.startsWith("/login/")) {
+        return "/";
+    }
+    if (role !== "admin" && (pathname === "/admin" || pathname.startsWith("/admin/"))) return "/";
     return cleaned;
 }
 
@@ -43,6 +60,9 @@ function LoginContent() {
     const register = useUserStore((state) => state.register);
     const setSession = useUserStore((state) => state.setSession);
     const isLoading = useUserStore((state) => state.isLoading);
+    const user = useUserStore((state) => state.user);
+    const isReady = useUserStore((state) => state.isReady);
+    const identityEpoch = useSyncExternalStore(subscribeSessionIdentity, () => captureSessionIdentity().epoch, () => 0);
     const linuxDoEnabled = useConfigStore((state) => state.publicSettings?.auth?.linuxDo?.enabled === true);
     const allowRegister = useConfigStore((state) => state.publicSettings?.auth?.allowRegister !== false);
     
@@ -51,27 +71,59 @@ function LoginContent() {
     const [countdown, setCountdown] = useState(0);
     const [isSendingCode, setIsSendingCode] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
+    const [callbackState, setCallbackState] = useState<"idle" | "pending" | "succeeded" | "failed">("idle");
+    const [navigationIntent, setNavigationIntent] = useState<{ identity: SessionIdentity; destination: string } | null>(null);
+    const navigatedRef = useRef("");
+    const callbackRequestRef = useRef(0);
 
-    const redirect = safeRedirect(searchParams.get("redirect"));
+    const callbackToken = searchParams.get("token");
+    const callbackError = searchParams.get("error");
+    const redirect = safeRedirect(searchParams.get("redirect"), user?.role === "admin" ? "admin" : "user");
 
     useEffect(() => {
-        const token = searchParams.get("token");
-        const error = searchParams.get("error");
-        if (error) message.error(error);
-        if (!token) return;
+        const token = callbackToken;
+        const requestId = ++callbackRequestRef.current;
+        if (callbackError) message.error(callbackError);
+        if (!token) {
+            setCallbackState(callbackError ? "failed" : "idle");
+            setNavigationIntent(null);
+            return;
+        }
         const callbackIdentity = captureSessionIdentity();
-        void fetchCurrentUser(token).then(async (user) => {
-            if (!isSessionIdentityCurrent(callbackIdentity)) return;
-            await setSession(token, user);
+        setCallbackState("pending");
+        void fetchCurrentUser(token).then(async (callbackUser) => {
+            if (requestId !== callbackRequestRef.current || !isSessionIdentityCurrent(callbackIdentity)) return;
+            await setSession(token, callbackUser);
             const active = captureSessionIdentity();
-            if (active.token !== token || active.userId !== user.id) return;
+            if (requestId !== callbackRequestRef.current || active.token !== token || active.userId !== callbackUser.id) return;
+            setCallbackState("succeeded");
+            setNavigationIntent({ identity: active, destination: safeRedirect(searchParams.get("redirect"), callbackUser.role) });
             message.success("登录成功");
-            router.replace(redirect);
-            router.refresh();
         }).catch((error) => {
-            if (isSessionIdentityCurrent(callbackIdentity)) message.error(error instanceof Error ? error.message : "登录验证失败");
+            if (requestId === callbackRequestRef.current && isSessionIdentityCurrent(callbackIdentity)) {
+                setCallbackState("failed");
+                setNavigationIntent(null);
+                message.error(error instanceof Error ? error.message : "登录验证失败");
+            }
         });
-    }, [message, redirect, router, searchParams, setSession]);
+    }, [callbackError, callbackToken, message, searchParams, setSession]);
+
+    useEffect(() => {
+        if (!isReady) return;
+        const identity = captureSessionIdentity();
+        const intent = navigationIntent;
+        const destination = intent && intent.identity.epoch === identity.epoch && intent.identity.token === identity.token && intent.identity.userId === identity.userId
+            ? intent.destination
+            : !callbackToken && !callbackError && callbackState !== "pending" && user
+            ? safeRedirect(searchParams.get("redirect"), user.role === "admin" ? "admin" : "user")
+            : null;
+        if (!destination) return;
+        const key = `${identity.epoch}:${identity.token}:${identity.userId}:${destination}`;
+        if (navigatedRef.current === key) return;
+        navigatedRef.current = key;
+        router.replace(destination);
+        router.refresh();
+    }, [callbackState, callbackToken, identityEpoch, isReady, navigationIntent, router, searchParams, user]);
 
     useEffect(() => {
         if (!allowRegister && mode === "register") setMode("login");
@@ -152,17 +204,16 @@ function LoginContent() {
                     verification_code: values.verification_code,
                 });
                 message.success("注册成功！账户与官方模型服务已全自动打通");
-                router.replace(redirect);
-                router.refresh();
-                if (user.role !== "admin") router.replace("/");
+                const identity = captureSessionIdentity();
+                setNavigationIntent({ identity, destination: safeRedirect(redirect, user.role === "admin" ? "admin" : "user") });
             } else {
                 const user = await login({
                     username: values.username || "",
                     password: values.password || "",
                 });
                 message.success("登录成功");
-                router.replace(user.role === "admin" ? redirect : "/");
-                router.refresh();
+                const identity = captureSessionIdentity();
+                setNavigationIntent({ identity, destination: safeRedirect(redirect, user.role === "admin" ? "admin" : "user") });
             }
         } catch (error) {
             message.error(error instanceof Error ? error.message : "登录失败，请检查账号密码");
