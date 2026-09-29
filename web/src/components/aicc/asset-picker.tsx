@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Empty, Input, QRCode, Select, Spin, Tag, Upload } from "antd";
 import { Radio } from "lucide-react";
 import { useUserStore } from "@/stores/use-user-store";
 import { AICC_UPLOAD_LIMITS, aiccAssets, aiccChannels, aiccCheck, aiccCreateAsset, aiccCreateGroup, aiccGroups, aiccSession, aiccUpload, aiccUploadExpiry, validateAiccFile, type AiccAsset, type AiccChannel, type AiccGroup, type AiccSession, type AiccUpload } from "@/services/api/aicc";
 import type { InsertAssetPayload } from "@/app/(user)/canvas/types";
+import { captureSessionIdentity, subscribeSessionIdentity } from "@/lib/session-identity";
 
 const statusLabels: Record<string, string> = { ACTIVE: "可用", PROCESSING: "处理中", FAILED: "入库失败", EXPIRED: "已过期" };
 const errorText = (error: unknown) => error instanceof Error ? error.message : "请求失败，请重试";
@@ -21,7 +22,8 @@ export function AiccAssetPicker({ onInsert, selectionEnabled = true }: PickerPro
 function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
     const { message } = App.useApp();
     const identity = useUserStore(state => state.user?.id);
-    const channelsQuery = useQuery({ queryKey: ["aicc-channels", identity], queryFn: ({ signal }) => aiccChannels(signal), retry: false, enabled: !!identity });
+    const identityEpoch = useSyncExternalStore(subscribeSessionIdentity, () => captureSessionIdentity().epoch, () => 0);
+    const channelsQuery = useQuery({ queryKey: ["aicc-channels", identity, identityEpoch], queryFn: ({ signal }) => aiccChannels(signal), retry: false, enabled: !!identity });
     const channels = Array.isArray(channelsQuery.data) ? channelsQuery.data : [];
     const [selectedChannelId, setSelectedChannelId] = useState<number | undefined>(undefined);
     const activeChannelId = selectedChannelId ?? (channels.length === 1 ? channels[0].id : undefined);
@@ -42,9 +44,9 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
     const lifecycle = useRef(0);
     const controller = useRef<AbortController | null>(null);
     useEffect(() => () => { lifecycle.current++; controller.current?.abort(); }, []);
-    const groups = useQuery({ queryKey: ["aicc", identity, "groups", type, groupPage, activeChannelId], queryFn: ({ signal }) => aiccGroups(type, groupPage, activeChannelId, signal), retry: false, enabled: channelReady });
+    const groups = useQuery({ queryKey: ["aicc", identity, identityEpoch, "groups", type, groupPage, activeChannelId], queryFn: ({ signal }) => aiccGroups(type, groupPage, activeChannelId, signal), retry: false, enabled: channelReady });
     const group = groups.data?.data.find(item => item.groupId === selected?.groupId) || groups.data?.data[0];
-    const assets = useQuery({ queryKey: ["aicc", identity, "assets", group?.groupId, type, assetPage, activeChannelId], queryFn: ({ signal }) => aiccAssets(group!, assetPage, activeChannelId, signal), enabled: channelReady && !!group, retry: false, refetchOnWindowFocus: false,
+    const assets = useQuery({ queryKey: ["aicc", identity, identityEpoch, "assets", group?.groupId, type, assetPage, activeChannelId], queryFn: ({ signal }) => aiccAssets(group!, assetPage, activeChannelId, signal), enabled: channelReady && !!group, retry: false, refetchOnWindowFocus: false,
         refetchIntervalInBackground: false,
         refetchInterval: query => pollCount.current < 12 && !query.state.error && query.state.data?.data.some(item => item.status.toUpperCase() === "PROCESSING") ? 10_000 : false,
     });

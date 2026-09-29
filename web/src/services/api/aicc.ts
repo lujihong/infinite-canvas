@@ -1,5 +1,6 @@
 import axios from "axios";
 import { useUserStore } from "@/stores/use-user-store";
+import { captureSessionIdentity, isSessionIdentityCurrent } from "@/lib/session-identity";
 
 export type AiccGroup = { groupId: string; groupName: string; groupType: "AIGC" | "LivenessFace"; channelId?: number };
 export type AiccAsset = { assetId: string; groupId: string; assetName: string; assetType: "Image" | "Video" | "Audio"; assetUrl?: string; status: string; channelId?: number };
@@ -26,9 +27,10 @@ export function aiccUploadExpiry(value: number): number {
 
 async function request(path: string, method: "GET" | "POST", data?: unknown, params?: Record<string, unknown>, signal?: AbortSignal) {
     const token = useUserStore.getState().token;
-    if (!token) throw new Error("请先登录后使用人物素材");
+    const identity = captureSessionIdentity();
+    if (!token || identity.token !== token || !identity.userId) throw new Error("请先登录后使用人物素材");
     const response = await axios.request({ url: `/api/aicc/${path}`, method, data, params, signal, timeout: path === "uploads" ? 120_000 : 60_000, headers: { Authorization: `Bearer ${token}` } });
-    if (signal?.aborted || useUserStore.getState().token !== token) throw new Error("请求已取消或登录身份已改变");
+    if (signal?.aborted || !isSessionIdentityCurrent(identity)) throw new Error("请求已取消或登录身份已改变");
     const envelope = response.data;
     if (!envelope || envelope.success !== true) throw new Error(envelope?.message || envelope?.msg || "人物素材请求失败");
     if (envelope.data?.state && envelope.data.state !== "OK") throw new Error("移动云素材服务返回异常");

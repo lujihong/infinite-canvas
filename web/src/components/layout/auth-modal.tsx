@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { LockOutlined, MailOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { App, Button, Checkbox, Form, Input, Modal, Segmented, Space } from "antd";
 
@@ -9,6 +9,7 @@ import { LegalModal, type LegalDocType } from "@/components/layout/legal-modal";
 import { requestPasswordReset, sendEmailVerification } from "@/services/api/auth";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { captureSessionIdentity, subscribeSessionIdentity } from "@/lib/session-identity";
 
 type AuthFormValues = {
     username?: string;
@@ -26,6 +27,8 @@ export function AuthModal() {
     const register = useUserStore((state) => state.register);
     const isLoading = useUserStore((state) => state.isLoading);
     const user = useUserStore((state) => state.user);
+    const isReady = useUserStore((state) => state.isReady);
+    const identityEpoch = useSyncExternalStore(subscribeSessionIdentity, () => captureSessionIdentity().epoch, () => 0);
     const allowRegister = useConfigStore((state) => state.publicSettings?.auth?.allowRegister !== false);
     const linuxDoEnabled = useConfigStore((state) => state.publicSettings?.auth?.linuxDo?.enabled === true);
 
@@ -38,10 +41,11 @@ export function AuthModal() {
     const [legalDoc, setLegalDoc] = useState<LegalDocType>(null);
 
     useEffect(() => {
-        if (user) {
+        const identity = captureSessionIdentity();
+        if (isReady && user && identity.token && identity.userId === user.id) {
             closeLoginModal();
         }
-    }, [user, closeLoginModal]);
+    }, [closeLoginModal, identityEpoch, isReady, user]);
 
     useEffect(() => {
         if (countdown <= 0) return;
@@ -128,8 +132,6 @@ export function AuthModal() {
 
             form.resetFields();
             closeLoginModal();
-            // The session transition is asynchronous; explicitly close again on the next frame so a stale modal render cannot remain visible.
-            requestAnimationFrame(() => useUserStore.getState().closeLoginModal());
         } catch (error) {
             message.error(error instanceof Error ? error.message : "操作失败，请检查输入");
         }
