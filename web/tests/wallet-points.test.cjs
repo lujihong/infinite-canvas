@@ -140,7 +140,7 @@ function uiModules(context) {
     const Overlay = ({ open, children, title }) => open ? React.createElement('section', null, title, children) : null;
     const Button = ({ children, onClick }) => React.createElement('button', { onClick }, children);
     const Skeleton = Object.assign(() => React.createElement('span', null, 'loading'), { Input: () => React.createElement('span', null, 'loading') });
-    const antd = { App: { useApp: () => ({ message: { warning() {}, error() {}, success() {} } }) }, Button, Modal: Overlay, Drawer: Overlay, Skeleton, QRCode: Box, Dropdown: Box, Tooltip: Box, Empty: Box, Input: Box, Tag: Box };
+    const antd = { App: { useApp: () => ({ message: { warning() {}, error() {}, success() {} } }) }, Button, Modal: Overlay, Drawer: Overlay, Skeleton, QRCode: Box, Dropdown: Box, Tooltip: Box, Empty: Box, Input: Box, Select: Box, Tag: Box };
     return { ...context.modules, antd, 'lucide-react': new Proxy({}, { get: () => () => null }), '@/components/ui/animated-theme-toggler': { AnimatedThemeToggler: Box }, '@/constant/credits': {}, '@/lib/utils': { cn: (...values) => values.join(' ') }, '@/lib/canvas-theme': { canvasThemes: { light: { node: { text: 'black' } } } }, '@/stores/use-config-store': { useConfigStore: selector => selector({ openConfigDialog() {} }) }, '@/stores/use-theme-store': { useThemeStore: selector => selector({ theme: 'light', setTheme() {} }) }, 'next/link': Box };
 }
 

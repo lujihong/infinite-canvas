@@ -44,6 +44,7 @@ async function setup(options = {}) {
             return success({ state: 'OK' });
         } },
         '@/stores/use-user-store': { useUserStore: store },
+        '@/lib/session-identity': { captureSessionIdentity: () => ({ epoch: 1, token: state.token, userId: state.user?.id || '' }), isSessionIdentityCurrent: value => value.epoch === 1 && value.token === state.token && value.userId === (state.user?.id || '') },
     }, { FormData: dom.window.FormData });
     const ui = {};
     ui.Button = ({ children, disabled, loading, onClick, ...props }) => React.createElement('button', { disabled, onClick, 'aria-label': props['aria-label'], 'data-loading': String(!!loading) }, children);
@@ -59,6 +60,8 @@ async function setup(options = {}) {
     const queryOptions = [];
     const modules = { react: React, 'react/jsx-runtime': require('react/jsx-runtime'), antd: ui, 'lucide-react': { Radio: () => null },
         '@tanstack/react-query': { useQuery: opts => { queryOptions.push(opts); return { data: opts.queryKey[0] === 'aicc-channels' ? [{id:6,name:'移动云',models:[]}] : opts.queryKey.includes('groups') ? groupData : {data:assetData.data.map(asset=>({...asset,channelId:6}))}, refetch: async () => {}, isPending: false, isLoading: false, isFetching: false, dataUpdatedAt: 0 }; } },
+        '@/lib/session-identity': { captureSessionIdentity: () => ({ epoch: 1, token: state.token, userId: state.user?.id || '' }), subscribeSessionIdentity: () => () => {}, isSessionIdentityCurrent: value => value.epoch === 1 && value.token === state.token && value.userId === (state.user?.id || '') },
+
         '@/stores/use-user-store': { useUserStore: store }, '@/services/api/aicc': api,
     };
     const picker = load('components/aicc/asset-picker.tsx', modules, { document, URL: dom.window.URL });
