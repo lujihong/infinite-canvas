@@ -39,8 +39,15 @@ func TestConsumptionDisplayWalletAndLogHTTPAgreement(t *testing.T) {
 			fmt.Fprint(w, `{"success":true,"data":{"quota_per_unit":500000,"usd_exchange_rate":1}}`)
 		case "/api/user/quota-by-token":
 			fmt.Fprint(w, `{"success":true,"data":{"quota":1000}}`)
-		case "/api/log/token":
-			fmt.Fprint(w, `{"success":true,"data":[{"id":1,"type":2,"quota":1000,"model_name":"text"},{"id":2,"type":2,"quota":1,"model_name":"text"},{"id":3,"type":5,"quota":1000,"model_name":"text","content":"upstream failed"},{"id":4,"type":6,"quota":1,"model_name":"text"},{"id":5,"type":5,"quota":0,"model_name":"text"}]}`)
+		case "/api/log/token/page":
+			if r.URL.Query().Get("start_timestamp") == "" || r.URL.Query().Get("end_timestamp") == "" {
+				t.Errorf("missing required time range")
+			}
+			if r.URL.Query().Get("before_id") == "" {
+				fmt.Fprint(w, `{"success":true,"data":{"items":[{"id":5,"type":5,"quota":0,"model_name":"text"},{"id":4,"type":6,"quota":1,"model_name":"text"},{"id":3,"type":5,"quota":1000,"model_name":"text","content":"upstream failed"}],"total":5,"snapshot_id":5,"next_before_id":3,"has_more":true}}`)
+			} else {
+				fmt.Fprint(w, `{"success":true,"data":{"items":[{"id":2,"type":2,"quota":1,"model_name":"text"},{"id":1,"type":2,"quota":1000,"model_name":"text"}],"total":5,"snapshot_id":5,"next_before_id":1,"has_more":false}}`)
+			}
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(404)
@@ -59,22 +66,40 @@ func TestConsumptionDisplayWalletAndLogHTTPAgreement(t *testing.T) {
 	if len(logs) != 5 {
 		t.Fatalf("logs count %d", len(logs))
 	}
-	if logs[0].MoneyYuan != wallet["balanceYuan"].(float64) || logs[0].PointsCost != wallet["points"].(float64) {
-		t.Fatalf("wallet/log disagree: wallet=%v log=%+v", wallet, logs[0])
+	byQuota := make(map[int64]ConsumptionLogItem)
+	for _, item := range logs {
+		byQuota[item.Quota] = item
 	}
-	if logs[0].MoneyYuan != .002 || logs[0].PointsCost != .02 {
+	charged := byQuota[1000]
+	if charged.MoneyYuan != wallet["balanceYuan"].(float64) || charged.PointsCost != wallet["points"].(float64) {
+		t.Fatalf("wallet/log disagree: wallet=%v log=%+v", wallet, charged)
+	}
+	if charged.MoneyYuan != .002 || charged.PointsCost != .02 {
 		t.Fatal("extra multiplier remains")
 	}
-	if logs[1].Status == "free" || logs[1].PointsCost <= 0 || logs[1].FormattedPoints != "<0.001 积分" {
-		t.Fatalf("tiny debit misclassified: %+v", logs[1])
+	if tiny := byQuota[1]; tiny.Status == "free" || tiny.PointsCost <= 0 || tiny.FormattedPoints != "<0.001 积分" {
+		t.Fatalf("tiny debit misclassified: %+v", tiny)
 	}
-	if logs[2].Status != "failed" || logs[2].PointsCost <= 0 || !strings.Contains(logs[2].StatusLabel, "存在扣费记录") {
+	var chargedFailure, refund, unchargedFailure *ConsumptionLogItem
+	for i := range logs {
+		item := &logs[i]
+		if item.Type == 5 && item.Quota > 0 {
+			chargedFailure = item
+		}
+		if item.Type == 6 {
+			refund = item
+		}
+		if item.Type == 5 && item.Quota == 0 {
+			unchargedFailure = item
+		}
+	}
+	if chargedFailure == nil || chargedFailure.Status != "failed" || chargedFailure.PointsCost <= 0 || !strings.Contains(chargedFailure.StatusLabel, "存在扣费记录") {
 		t.Fatal("charged error concealed")
 	}
-	if logs[3].StatusLabel != "额度退还" || logs[3].FormattedPoints != "+<0.001 积分" {
-		t.Fatalf("small refund wrong: %+v", logs[3])
+	if refund == nil || refund.StatusLabel != "额度退还" || refund.FormattedPoints != "+<0.001 积分" {
+		t.Fatalf("small refund wrong: %+v", refund)
 	}
-	if logs[4].StatusLabel != "调用失败 · 未扣费" || logs[4].PointsCost != 0 {
+	if unchargedFailure == nil || unchargedFailure.StatusLabel != "调用失败 · 未扣费" || unchargedFailure.PointsCost != 0 {
 		t.Fatal("uncharged error wrong")
 	}
 }

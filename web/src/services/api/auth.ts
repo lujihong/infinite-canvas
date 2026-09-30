@@ -110,8 +110,27 @@ export type ConsumptionLogItem = {
     upstream_request_id?: string;
 };
 
-export async function fetchUserConsumptionLogs(token: string) {
-    return apiGet<ConsumptionLogItem[]>("/api/v1/user/logs", undefined, token);
+export type ConsumptionLogRange = {
+    startTimestamp?: number;
+    endTimestamp?: number;
+};
+
+export async function fetchUserConsumptionLogs(token: string, range?: ConsumptionLogRange) {
+    return apiGet<ConsumptionLogItem[]>("/api/v1/user/logs", range ? {
+        start_timestamp: range.startTimestamp,
+        end_timestamp: range.endTimestamp,
+    } : undefined, token);
+}
+
+export async function fetchUserConsumptionLogsExport(token: string, range?: ConsumptionLogRange) {
+    const response = await fetch(`/api/v1/user/logs/export?${new URLSearchParams({
+        ...(range?.startTimestamp ? { start_timestamp: String(range.startTimestamp) } : {}),
+        ...(range?.endTimestamp ? { end_timestamp: String(range.endTimestamp) } : {}),
+    })}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) throw new Error(`导出失败（HTTP ${response.status}）`);
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("spreadsheetml")) throw new Error("导出接口未返回 Excel 文件");
+    return response.blob();
 }
 
 export type RechargeLogItem = {

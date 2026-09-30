@@ -28,6 +28,7 @@ import dayjs from "dayjs";
 import {
     checkRechargeStatus,
     fetchUserConsumptionLogs,
+    fetchUserConsumptionLogsExport,
     fetchUserRechargeLogs,
     type ConsumptionLogItem,
     type RechargeLogItem
@@ -61,7 +62,10 @@ export function ConsumptionLogsDrawer({
     const [keyword, setKeyword] = useState("");
     const [category, setCategory] = useState<"all" | "image" | "video" | "audio" | "text">("all");
     const [statusFilter, setStatusFilter] = useState<"all" | "success" | "failed" | "refunded">("all");
-    const [exportRange, setExportRange] = useState<"all" | "day" | "week" | "month" | "year">("all");
+    const [exportRange, setExportRange] = useState<"all" | "day" | "week" | "month" | "year" | "custom">("all");
+    const [customStart, setCustomStart] = useState("");
+    const [customEnd, setCustomEnd] = useState("");
+    const [exporting, setExporting] = useState(false);
     const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
     const [selectedDetailLog, setSelectedDetailLog] = useState<ConsumptionLogItem | null>(null);
 
@@ -112,6 +116,56 @@ export function ConsumptionLogsDrawer({
             if (isCurrent()) setRechargeLogs([]);
         } finally {
             if (isCurrent()) setLoadingRecharge(false);
+        }
+    };
+
+    const getExportBounds = () => {
+        if (exportRange === "all") return undefined;
+        if (exportRange === "day") {
+            const now = dayjs();
+            return { startTimestamp: now.startOf("day").unix(), endTimestamp: now.add(1, "day").startOf("day").unix() };
+        }
+        if (exportRange === "week") {
+            const now = dayjs();
+            return { startTimestamp: now.startOf("week").unix(), endTimestamp: now.endOf("week").add(1, "second").unix() };
+        }
+        if (exportRange === "month") {
+            const now = dayjs();
+            return { startTimestamp: now.startOf("month").unix(), endTimestamp: now.add(1, "month").startOf("month").unix() };
+        }
+        if (exportRange === "year") {
+            const now = dayjs();
+            return { startTimestamp: now.startOf("year").unix(), endTimestamp: now.add(1, "year").startOf("year").unix() };
+        }
+        const start = dayjs(customStart);
+        const end = dayjs(customEnd);
+        if (!start.isValid() || !end.isValid() || !end.isAfter(start)) return undefined;
+        return { startTimestamp: start.unix(), endTimestamp: end.unix() };
+    };
+
+    const handleExport = async () => {
+        if (!token) return;
+        const bounds = getExportBounds();
+        if (exportRange !== "all" && !bounds) {
+            message.error("请选择有效的导出时间区间");
+            return;
+        }
+        setExporting(true);
+        try {
+            const blob = await fetchUserConsumptionLogsExport(token, bounds);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `鑫元宝消费明细-${dayjs().format("YYYYMMDD-HHmmss")}.xlsx`;
+            document.body.append(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            message.success("消费明细 Excel 已下载");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "导出消费明细失败");
+        } finally {
+            setExporting(false);
         }
     };
 
@@ -166,7 +220,7 @@ export function ConsumptionLogsDrawer({
     // 消费分类、状态与关键词过滤
     const filteredLogs = useMemo(() => {
         let list = logs;
-        if (exportRange !== "all") {
+        if (exportRange !== "all" && exportRange !== "custom") {
             const now = dayjs();
             const start = exportRange === "day" ? now.startOf("day") : exportRange === "week" ? now.startOf("week") : exportRange === "month" ? now.startOf("month") : now.startOf("year");
             const end = exportRange === "day" ? now.endOf("day") : exportRange === "week" ? now.endOf("week") : exportRange === "month" ? now.endOf("month") : now.endOf("year");
@@ -377,8 +431,14 @@ export function ConsumptionLogsDrawer({
                                 </div>
 
                                 <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-                                    <Select size="small" value={exportRange} onChange={setExportRange} options={[{ value: "all", label: "全部时间" }, { value: "day", label: "今天" }, { value: "week", label: "本周" }, { value: "month", label: "本月" }, { value: "year", label: "今年" }]} className="min-w-24" />
-                                    <button type="button" className="rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800" onClick={() => downloadConsumptionCsv(filteredLogs)}>导出 Excel</button>
+                                    <Select size="small" value={exportRange} onChange={setExportRange} options={[{ value: "all", label: "全部时间" }, { value: "day", label: "今天" }, { value: "week", label: "本周" }, { value: "month", label: "本月" }, { value: "year", label: "今年" }, { value: "custom", label: "自定义" }]} className="min-w-24" />
+                                    {exportRange === "custom" ? (
+                                        <>
+                                            <input aria-label="导出开始时间" type="datetime-local" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-7 rounded-md border border-stone-200 px-1.5 text-[11px] dark:border-stone-700 dark:bg-stone-900" />
+                                            <input aria-label="导出结束时间" type="datetime-local" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-7 rounded-md border border-stone-200 px-1.5 text-[11px] dark:border-stone-700 dark:bg-stone-900" />
+                                        </>
+                                    ) : null}
+                                    <button type="button" disabled={exporting} className="rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800" onClick={() => void handleExport}>{exporting ? "导出中..." : "导出 Excel"}</button>
                                     <div className="w-56">
                                         <Input
                                         prefix={<Search className="size-3 text-stone-400" />}

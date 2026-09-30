@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -890,8 +891,18 @@ func parseTaskAction(modelName string, content string, isVideo bool) string {
 	return "文本对话"
 }
 
-// FetchUserConsumptionLogs 获取当前用户在中转站的真实调用与扣费明细日志
+// FetchUserConsumptionLogs 获取当前用户在中转站的真实调用与扣费明细日志。
+// 默认查询最近一年，所有上游页面通过 snapshot_id/before_id 游标完整拉取。
 func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
+	end := time.Now().Unix()
+	return FetchUserConsumptionLogsRange(userID, end-365*24*60*60, end)
+}
+
+// FetchUserConsumptionLogsRange 查询指定的半开区间 [start,end)，用于列表和导出。
+func FetchUserConsumptionLogsRange(userID string, start, end int64) ([]ConsumptionLogItem, error) {
+	if start <= 0 || end <= start {
+		return nil, errors.New("消费明细时间范围无效")
+	}
 	token := GetUserExclusiveNewAPIToken(userID)
 	if token == "" {
 		return []ConsumptionLogItem{}, nil
@@ -903,7 +914,7 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 	}
 
 	// 1. 查询本地最近的视频任务，建立任务ID和完成时间关联索引
-	localTasks, _ := repository.ListRecentUserVideoTasks(userID, 100)
+	localTasks, _ := repository.ListRecentUserVideoTasks(userID, 0)
 	localTaskByUpstreamID := make(map[string]model.VideoTask)
 	localRunningTasks := make([]model.VideoTask, 0)
 	for _, t := range localTasks {
@@ -911,48 +922,96 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 			localTaskByUpstreamID[t.UpstreamTaskID] = t
 		}
 		if t.Status == "queued" || t.Status == "in_progress" || t.Status == "processing" || t.Status == "running" {
-			localRunningTasks = append(localRunningTasks, t)
+			if created, parseErr := time.Parse(time.RFC3339, t.CreatedAt); parseErr == nil {
+				createdAt := created.Unix()
+				if createdAt >= start && createdAt < end {
+					localRunningTasks = append(localRunningTasks, t)
+				}
+			} else {
+				localRunningTasks = append(localRunningTasks, t)
+			}
 		}
 	}
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, getNewAPIBaseURL()+"/api/log/token?size=100", nil)
-	if err != nil {
-		return nil, err
+	type upstreamTokenLog struct {
+		ID                int    `json:"id"`
+		CreatedAt         int64  `json:"created_at"`
+		ModelName         string `json:"model_name"`
+		Type              int    `json:"type"`
+		Quota             int64  `json:"quota"`
+		PromptTokens      int    `json:"prompt_tokens"`
+		CompletionTokens  int    `json:"completion_tokens"`
+		UseTime           int    `json:"use_time"`
+		IsStream          bool   `json:"is_stream"`
+		Content           string `json:"content"`
+		RequestID         string `json:"request_id"`
+		UpstreamRequestID string `json:"upstream_request_id"`
+		Other             string `json:"other"`
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Host", "api.xybcloud.com")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("请求消费明细失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var res struct {
+	type tokenLogPage struct {
 		Success bool `json:"success"`
-		Data    []struct {
-			ID                int    `json:"id"`
-			CreatedAt         int64  `json:"created_at"`
-			ModelName         string `json:"model_name"`
-			Type              int    `json:"type"`
-			Quota             int64  `json:"quota"`
-			PromptTokens      int    `json:"prompt_tokens"`
-			CompletionTokens  int    `json:"completion_tokens"`
-			UseTime           int    `json:"use_time"`
-			IsStream          bool   `json:"is_stream"`
-			Content           string `json:"content"`
-			RequestID         string `json:"request_id"`
-			UpstreamRequestID string `json:"upstream_request_id"`
-			Other             string `json:"other"`
+		Data    struct {
+			Items        []upstreamTokenLog `json:"items"`
+			Total        int64              `json:"total"`
+			SnapshotID   int                `json:"snapshot_id"`
+			NextBeforeID int                `json:"next_before_id"`
+			HasMore      bool               `json:"has_more"`
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil || !res.Success {
-		return []ConsumptionLogItem{}, nil
+	client := &http.Client{Timeout: 30 * time.Second}
+	allLogs := make([]upstreamTokenLog, 0)
+	snapshotID, beforeID := 0, 0
+	for page := 0; page < 1000; page++ {
+		query := url.Values{
+			"start_timestamp": {strconv.FormatInt(start, 10)},
+			"end_timestamp":   {strconv.FormatInt(end, 10)},
+			"limit":           {"1000"},
+		}
+		if snapshotID > 0 {
+			query.Set("snapshot_id", strconv.Itoa(snapshotID))
+		}
+		if beforeID > 0 {
+			query.Set("before_id", strconv.Itoa(beforeID))
+		}
+		req, err := http.NewRequest(http.MethodGet, getNewAPIBaseURL()+"/api/log/token/page?"+query.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Host", "api.xybcloud.com")
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("请求消费明细失败: %w", err)
+		}
+		var res tokenLogPage
+		decodeErr := json.NewDecoder(resp.Body).Decode(&res)
+		resp.Body.Close()
+		if decodeErr != nil {
+			return nil, fmt.Errorf("解析消费明细失败: %w", decodeErr)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 || !res.Success {
+			return nil, fmt.Errorf("中转站消费明细接口失败: HTTP %d", resp.StatusCode)
+		}
+		if page == 0 {
+			snapshotID = res.Data.SnapshotID
+		} else if res.Data.SnapshotID != snapshotID {
+			return nil, errors.New("消费明细分页快照发生变化，已中止导出")
+		}
+		allLogs = append(allLogs, res.Data.Items...)
+		if !res.Data.HasMore {
+			break
+		}
+		if res.Data.NextBeforeID <= 0 || res.Data.NextBeforeID >= beforeID && beforeID > 0 {
+			return nil, errors.New("中转站消费明细游标无效，已中止导出")
+		}
+		beforeID = res.Data.NextBeforeID
+		if page == 999 {
+			return nil, errors.New("消费明细超过安全分页上限，请缩小时间范围")
+		}
 	}
 
-	logs := make([]ConsumptionLogItem, 0, len(res.Data)+len(localRunningTasks))
+	logs := make([]ConsumptionLogItem, 0, len(allLogs)+len(localRunningTasks))
 
 	// 2. 先把本地处于进行中的视频任务前置展示在流水最顶端
 	for _, rt := range localRunningTasks {
@@ -998,16 +1057,16 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 	}
 
 	// 3. 处理中转站真实物理日志
-	for _, l := range res.Data {
+	for _, l := range allLogs {
 		moneyYuan, pointsCost := quotaBillingValues(l.Quota, quotaPerUnit)
 
 		// 解析关联任务信息
 		var taskID string
 		var videoURL string
-			var otherReason string
-			var preConsumedQuota int
-			var actualQuota int
-			if l.Other != "" {
+		var otherReason string
+		var preConsumedQuota int
+		var actualQuota int
+		if l.Other != "" {
 			var otherData struct {
 				TaskID           string `json:"task_id"`
 				Reason           string `json:"reason"`
@@ -1021,10 +1080,10 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 				if otherData.Reason != "" {
 					otherReason = otherData.Reason
 				}
-					preConsumedQuota = otherData.PreConsumedQuota
-					actualQuota = otherData.ActualQuota
-				}
+				preConsumedQuota = otherData.PreConsumedQuota
+				actualQuota = otherData.ActualQuota
 			}
+		}
 
 		lowerModel := strings.ToLower(l.ModelName)
 		isVideo := strings.Contains(lowerModel, "video") ||
@@ -1085,17 +1144,17 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 		progress := 100
 		errMsg := ""
 		errDetail := ""
-			formattedPoints := formatBillingPoints(pointsCost)
-			prePoints := 0.0
-			actualPoints := 0.0
-			if preConsumedQuota > 0 {
-				_, prePoints = quotaBillingValues(int64(preConsumedQuota), quotaPerUnit)
-			}
-			if actualQuota > 0 {
-				_, actualPoints = quotaBillingValues(int64(actualQuota), quotaPerUnit)
-			}
+		formattedPoints := formatBillingPoints(pointsCost)
+		prePoints := 0.0
+		actualPoints := 0.0
+		if preConsumedQuota > 0 {
+			_, prePoints = quotaBillingValues(int64(preConsumedQuota), quotaPerUnit)
+		}
+		if actualQuota > 0 {
+			_, actualPoints = quotaBillingValues(int64(actualQuota), quotaPerUnit)
+		}
 
-			if l.Type == 5 {
+		if l.Type == 5 {
 			// Type 5: failed; preserve charged quota when present.
 			status = "failed"
 			statusLabel = consumptionStatusLabel(l.Type, l.Quota, "")
@@ -1156,13 +1215,13 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 			TaskID:            taskID,
 			TaskAction:        taskAction,
 			VideoURL:          videoURL,
-				Quota:             l.Quota,
-				PointsCost:        pointsCost,
-				FormattedPoints:   formattedPoints,
-				PreConsumedQuota:  int64(preConsumedQuota),
-				ActualQuota:       int64(actualQuota),
-				PreConsumedPoints: prePoints,
-				ActualPoints:      actualPoints,
+			Quota:             l.Quota,
+			PointsCost:        pointsCost,
+			FormattedPoints:   formattedPoints,
+			PreConsumedQuota:  int64(preConsumedQuota),
+			ActualQuota:       int64(actualQuota),
+			PreConsumedPoints: prePoints,
+			ActualPoints:      actualPoints,
 			MoneyYuan:         moneyYuan,
 			FormattedMoney:    formatBillingMoney(moneyYuan),
 			PromptTokens:      l.PromptTokens,
