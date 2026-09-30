@@ -127,7 +127,7 @@ func UserConsumptionLogsExport(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 	sheet := "消费明细"
 	file.SetSheetName(file.GetSheetName(0), sheet)
-	headers := []string{"ID", "创建时间Unix", "提交时间Unix", "完成时间Unix", "模型", "类型", "状态", "状态说明", "进度", "耗时秒", "任务ID", "任务类型", "视频URL", "Quota", "积分", "积分展示", "预扣Quota", "实际Quota", "预扣积分", "最终积分", "金额元", "金额展示", "输入Tokens", "输出Tokens", "耗时毫秒", "流式", "错误信息", "错误详情", "请求ID", "上游请求ID"}
+	headers := []string{"ID", "创建时间(北京时间)", "提交时间(北京时间)", "完成时间(北京时间)", "模型", "类型", "状态", "状态说明", "进度", "耗时秒", "任务ID", "任务类型", "视频URL", "Quota", "积分", "积分展示", "预扣Quota", "实际Quota", "预扣积分", "最终积分", "金额元", "金额展示", "输入Tokens", "输出Tokens", "耗时毫秒", "流式", "错误信息", "错误详情", "请求ID", "上游请求ID"}
 	for col, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(col+1, 1)
 		if err := file.SetCellStr(sheet, cell, header); err != nil {
@@ -136,7 +136,7 @@ func UserConsumptionLogsExport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for row, item := range logs {
-		values := []any{item.ID, item.CreatedAt, item.SubmitTime, item.CompleteTime, item.ModelName, item.Type, item.Status, item.StatusLabel, item.Progress, item.DurationSeconds, item.TaskID, item.TaskAction, item.VideoURL, item.Quota, item.PointsCost, item.FormattedPoints, item.PreConsumedQuota, item.ActualQuota, item.PreConsumedPoints, item.ActualPoints, item.MoneyYuan, item.FormattedMoney, item.PromptTokens, item.CompletionTokens, item.UseTime, item.IsStream, item.ErrorMessage, item.ErrorDetail, item.RequestID, item.UpstreamRequestID}
+		values := []any{item.ID, formatExportDateTime(item.CreatedAt), formatExportDateTime(item.SubmitTime), formatExportDateTime(item.CompleteTime), item.ModelName, item.Type, item.Status, item.StatusLabel, item.Progress, item.DurationSeconds, item.TaskID, item.TaskAction, item.VideoURL, item.Quota, item.PointsCost, item.FormattedPoints, item.PreConsumedQuota, item.ActualQuota, item.PreConsumedPoints, item.ActualPoints, item.MoneyYuan, item.FormattedMoney, item.PromptTokens, item.CompletionTokens, item.UseTime, item.IsStream, item.ErrorMessage, item.ErrorDetail, item.RequestID, item.UpstreamRequestID}
 		for col, value := range values {
 			cell, _ := excelize.CoordinatesToCellName(col+1, row+2)
 			if text, ok := value.(string); ok && len(text) > 0 && strings.ContainsRune("=+-@", []rune(text)[0]) {
@@ -157,6 +157,13 @@ func UserConsumptionLogsExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="consumption-logs.xlsx"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(output.Bytes())
+}
+
+func formatExportDateTime(unixSeconds int64) string {
+	if unixSeconds <= 0 {
+		return ""
+	}
+	return time.Unix(unixSeconds, 0).In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02 15:04:05")
 }
 
 func consumptionRange(r *http.Request, allHistory bool) (int64, int64, error) {

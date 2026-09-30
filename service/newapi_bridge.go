@@ -949,7 +949,9 @@ func FetchUserConsumptionLogsRange(userID string, start, end int64) ([]Consumpti
 		Other             string `json:"other"`
 	}
 	type tokenLogPage struct {
-		Success bool `json:"success"`
+		// New-API success responses expose the payload with HTTP 200 and may omit
+		// the legacy success boolean; only an explicit false is a business failure.
+		Success *bool `json:"success"`
 		Data    struct {
 			Items        []upstreamTokenLog `json:"items"`
 			Total        int64              `json:"total"`
@@ -990,7 +992,7 @@ func FetchUserConsumptionLogsRange(userID string, start, end int64) ([]Consumpti
 		if decodeErr != nil {
 			return nil, fmt.Errorf("解析消费明细失败: %w", decodeErr)
 		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 || !res.Success {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 || (res.Success != nil && !*res.Success) {
 			return nil, fmt.Errorf("中转站消费明细接口失败: HTTP %d", resp.StatusCode)
 		}
 		if page == 0 {
