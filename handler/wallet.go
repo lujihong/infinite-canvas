@@ -1,10 +1,13 @@
 package handler
 
 import (
-	"bytes"
+	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +16,35 @@ import (
 
 	"github.com/tigerowo/infinite-canvas/service"
 )
+
+type workbenchFileZipWriter struct {
+	file *os.File
+	zip  *zip.Writer
+}
+
+func (w *workbenchFileZipWriter) Create(name string) (io.Writer, error) { return w.zip.Create(name) }
+func (w *workbenchFileZipWriter) AddFS(fsys fs.FS) error                { return w.zip.AddFS(fsys) }
+func (w *workbenchFileZipWriter) Close() error {
+	if err := w.zip.Close(); err != nil {
+		return err
+	}
+	if w.file != nil {
+		if err := w.file.Sync(); err != nil {
+			_ = w.file.Close()
+			return err
+		}
+		return w.file.Close()
+	}
+	return nil
+}
+
+func tempFile(name string) *os.File {
+	f, err := os.OpenFile(name, os.O_RDWR|os.O_TRUNC, 0600)
+	if err != nil {
+		return nil
+	}
+	return f
+}
 
 // UserWallet 查询当前登录用户的算力钱包余额与折算金额
 func UserWallet(w http.ResponseWriter, r *http.Request) {
@@ -148,15 +180,46 @@ func UserConsumptionLogsExport(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	var output bytes.Buffer
-	if err := file.Write(&output); err != nil {
+	temp, err := os.CreateTemp("", "infinite-canvas-consumption-*.xlsx")
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	name := temp.Name()
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(name)
+		FailError(w, err)
+		return
+	}
+	defer os.Remove(name)
+	outputFile := tempFile(name)
+	if outputFile == nil {
+		Fail(w, "创建导出文件失败")
+		return
+	}
+	file.SetZipWriter(func(io.Writer) excelize.ZipWriter {
+		return &workbenchFileZipWriter{file: outputFile, zip: zip.NewWriter(outputFile)}
+	})
+	// Rebuild through the file-backed writer so the HTTP response never buffers the workbook.
+	if err := file.Write(io.Discard); err != nil {
+		FailError(w, err)
+		return
+	}
+	output, err := os.Open(name)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	defer output.Close()
+	info, err := output.Stat()
+	if err != nil {
 		FailError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", `attachment; filename="consumption-logs.xlsx"`)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(output.Bytes())
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	http.ServeContent(w, r, "consumption-logs.xlsx", info.ModTime(), output)
 }
 
 func formatExportDuration(seconds float64) string {
