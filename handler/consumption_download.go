@@ -84,6 +84,12 @@ func registerConsumptionDownload(w http.ResponseWriter, r *http.Request, userID,
 		return errors.New("导出请求编号无效")
 	}
 	entry := &consumptionDownload{userID: userID, auth: auth, filename: filename, dir: dir, requestID: requestID, proof: sha256.Sum256([]byte(proof)), expires: time.Now().Add(2 * time.Minute)}
+	consumptionGenerations.Lock()
+	defer consumptionGenerations.Unlock()
+	generation, exists := consumptionGenerations.items[consumptionRequestKey(auth, requestID)]
+	if !exists || generation.ctx.Err() != nil {
+		return errors.New("导出已取消")
+	}
 	consumptionDownloads.Lock()
 	// Bound retained disk separately from the generation gate: one file per user, eight total.
 	for oldID, old := range consumptionDownloads.files {
@@ -170,14 +176,24 @@ func CancelPendingConsumptionExports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth := consumptionBearer(r)
+	requestID := r.URL.Query().Get("export_request_id")
+	if !validConsumptionRequestID(requestID) {
+		FailWithStatus(w, http.StatusBadRequest, "导出请求编号无效")
+		return
+	}
+	consumptionGenerations.Lock()
+	if generation, exists := consumptionGenerations.items[consumptionRequestKey(auth, requestID)]; exists {
+		generation.cancel()
+	}
 	consumptionDownloads.Lock()
 	for id, entry := range consumptionDownloads.files {
-		if entry.userID == user.ID && entry.auth == auth {
+		if entry.userID == user.ID && entry.auth == auth && entry.requestID == requestID {
 			delete(consumptionDownloads.files, id)
 			entry.timer.Stop()
 			_ = os.RemoveAll(entry.dir)
 		}
 	}
 	consumptionDownloads.Unlock()
+	consumptionGenerations.Unlock()
 	OK(w, true)
 }

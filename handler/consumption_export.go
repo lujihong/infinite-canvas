@@ -75,6 +75,27 @@ func serveConsumptionExport(w http.ResponseWriter, r *http.Request, prepare bool
 	defer release()
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
+	if prepare {
+		requestID := r.URL.Query().Get("export_request_id")
+		if !validConsumptionRequestID(requestID) {
+			FailWithStatus(w, http.StatusBadRequest, "导出请求编号无效")
+			return
+		}
+		key := consumptionRequestKey(consumptionBearer(r), requestID)
+		consumptionGenerations.Lock()
+		if _, exists := consumptionGenerations.items[key]; exists {
+			consumptionGenerations.Unlock()
+			FailWithStatus(w, http.StatusConflict, "导出请求重复")
+			return
+		}
+		consumptionGenerations.items[key] = consumptionGeneration{cancel: cancel, ctx: ctx}
+		consumptionGenerations.Unlock()
+		defer func() {
+			consumptionGenerations.Lock()
+			delete(consumptionGenerations.items, key)
+			consumptionGenerations.Unlock()
+		}()
+	}
 	dir, err := os.MkdirTemp("", "consumption-export-*")
 	if err != nil {
 		FailError(w, err)
