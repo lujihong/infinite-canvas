@@ -1053,22 +1053,3 @@ export function ConsumptionLogsDrawer({
         </Drawer>
     );
 }
-
-function downloadConsumptionCsv(logs: ConsumptionLogItem[]) {
-    const headers = ["提交时间", "完成时间", "模型", "任务类型", "任务ID", "状态", "状态说明", "原始Quota", "积分", "预扣积分", "最终积分", "本次差额", "输入Tokens", "输出Tokens", "耗时秒", "请求ID", "上游请求ID", "错误信息"];
-    const escapeCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-    const rows = logs.map((log) => [
-        log.submit_time || log.created_at ? dayjs((log.submit_time || log.created_at) * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
-        log.complete_time ? dayjs(log.complete_time * 1000).format("YYYY-MM-DD HH:mm:ss") : "",
-        log.model_name, log.task_action, log.task_id, log.status, log.status_label, log.quota, log.points_cost,
-        log.pre_consumed_points, log.actual_points, log.status_label === "差额补扣" ? log.points_cost : "",
-        log.prompt_tokens, log.completion_tokens, log.duration_seconds ?? (log.use_time / 1000), log.request_id, log.upstream_request_id, log.error_message || log.error_detail,
-    ].map(escapeCell).join(","));
-    const blob = new Blob(["\\ufeff" + [headers.map(escapeCell).join(","), ...rows].join("\\r\\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `鑫元宝消费明细-${dayjs().format("YYYYMMDD-HHmmss")}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-}
