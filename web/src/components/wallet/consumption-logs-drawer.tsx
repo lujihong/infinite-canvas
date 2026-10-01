@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Drawer, Empty, Input, Modal, Select, Skeleton, Tag, message } from "antd";
 import {
     AlertCircle,
@@ -28,7 +28,8 @@ import dayjs from "dayjs";
 import {
     checkRechargeStatus,
     fetchUserConsumptionLogs,
-    fetchUserConsumptionLogsExport,
+    prepareUserConsumptionLogsExport,
+    cancelUserConsumptionLogsExport,
     fetchUserRechargeLogs,
     type ConsumptionLogItem,
     type RechargeLogItem
@@ -37,6 +38,8 @@ import { useUserStore } from "@/stores/use-user-store";
 import { useWalletStore } from "@/stores/use-wallet-store";
 import { consumptionCostPresentation } from "./consumption-cost";
 import { formatPoints, isKnownPoints } from "@/lib/points";
+import { captureSessionIdentity, isSessionIdentityCurrent, subscribeSessionIdentity } from "@/lib/session-identity";
+import { consumptionLogBounds, createConsumptionExportGuard, filterConsumptionLogs, formatConsumptionTime } from "./consumption-log-utils";
 
 type ConsumptionLogsDrawerProps = {
     open: boolean;
@@ -53,6 +56,7 @@ export function ConsumptionLogsDrawer({
 }: ConsumptionLogsDrawerProps) {
     const token = useUserStore((state) => state.token);
     const user = useUserStore((state) => state.user);
+    const identityEpoch = useSyncExternalStore(subscribeSessionIdentity, () => captureSessionIdentity().epoch, () => 0);
     const wallet = useWalletStore((state) => state.wallet);
     const [mainTab, setMainTab] = useState<"consumption" | "recharge">("consumption");
 
@@ -78,6 +82,9 @@ export function ConsumptionLogsDrawer({
     const [rechargeAvailable, setRechargeAvailable] = useState(false);
     const logRequest = useRef(0);
     const rechargeRequest = useRef(0);
+    const [exportGuard] = useState(createConsumptionExportGuard);
+    const bounds = useMemo(() => consumptionLogBounds(exportRange, customStart, customEnd), [exportRange, customStart, customEnd, open, identityEpoch, logs]);
+    const currentFilter = useMemo(() => bounds ? { ...bounds, category, status: statusFilter, keyword } : null, [bounds, category, statusFilter, keyword]);
     const isCurrentUser = () => {
         const current = useUserStore.getState();
         return current.token === token && current.user?.id === user?.id;
@@ -88,7 +95,8 @@ export function ConsumptionLogsDrawer({
         setLogsAvailable(false);
         if (!token || !user) return;
         setLoadingLogs(true);
-        const isCurrent = () => request === logRequest.current && isCurrentUser();
+        const identity = captureSessionIdentity();
+        const isCurrent = () => request === logRequest.current && isCurrentUser() && isSessionIdentityCurrent(identity);
         try {
             const data = await fetchUserConsumptionLogs(token);
             if (!isCurrent()) return;
@@ -106,7 +114,8 @@ export function ConsumptionLogsDrawer({
         setRechargeAvailable(false);
         if (!token || !user) return;
         setLoadingRecharge(true);
-        const isCurrent = () => request === rechargeRequest.current && isCurrentUser();
+        const identity = captureSessionIdentity();
+        const isCurrent = () => request === rechargeRequest.current && isCurrentUser() && isSessionIdentityCurrent(identity);
         try {
             const data = await fetchUserRechargeLogs(token);
             if (!isCurrent()) return;
@@ -119,54 +128,48 @@ export function ConsumptionLogsDrawer({
         }
     };
 
-    const getExportBounds = () => {
-        if (exportRange === "all") return undefined;
-        if (exportRange === "day") {
-            const now = dayjs();
-            return { startTimestamp: now.startOf("day").unix(), endTimestamp: now.add(1, "day").startOf("day").unix() };
-        }
-        if (exportRange === "week") {
-            const now = dayjs();
-            return { startTimestamp: now.startOf("week").unix(), endTimestamp: now.endOf("week").add(1, "second").unix() };
-        }
-        if (exportRange === "month") {
-            const now = dayjs();
-            return { startTimestamp: now.startOf("month").unix(), endTimestamp: now.add(1, "month").startOf("month").unix() };
-        }
-        if (exportRange === "year") {
-            const now = dayjs();
-            return { startTimestamp: now.startOf("year").unix(), endTimestamp: now.add(1, "year").startOf("year").unix() };
-        }
-        const start = dayjs(customStart);
-        const end = dayjs(customEnd);
-        if (!start.isValid() || !end.isValid() || !end.isAfter(start)) return undefined;
-        return { startTimestamp: start.unix(), endTimestamp: end.unix() };
-    };
-
     const handleExport = async () => {
-        if (!token) return;
-        const bounds = getExportBounds();
-        if (exportRange !== "all" && !bounds) {
-            message.error("请选择有效的导出时间区间");
+        if (!open || !token || !user || !isCurrentUser()) return;
+        if (!currentFilter) {
+            message.error("请选择有效的北京时间区间，结束时间须晚于开始时间");
             return;
         }
+        // Synchronous gate also blocks a second click before React commits loading state.
+        const exportRequestId = crypto.randomUUID();
+        const ticket = exportGuard.start(token, user.id, () => { void cancelUserConsumptionLogsExport(token, exportRequestId); });
+        if (!ticket) return;
         setExporting(true);
         try {
-            const blob = await fetchUserConsumptionLogsExport(token, bounds);
-            const url = URL.createObjectURL(blob);
+            const prepared = await prepareUserConsumptionLogsExport(token, currentFilter, ticket.controller.signal, exportRequestId);
+            if (!ticket.isCurrent() || !isCurrentUser()) return;
             const link = document.createElement("a");
-            link.href = url;
-            link.download = `鑫元宝消费明细-${dayjs().format("YYYYMMDD-HHmmss")}.xlsx`;
-            document.body.append(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(url);
-            message.success("消费明细 Excel 已下载");
+            try {
+                link.href = prepared.download_url;
+                link.download = prepared.file_name;
+                document.body.append(link);
+                if (!ticket.isCurrent() || !isCurrentUser()) return;
+                link.click();
+                message.success("已开始下载消费明细 Excel");
+            } finally {
+                link.remove();
+            }
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "导出消费明细失败");
+            if (ticket.isCurrent() && isCurrentUser()) {
+                message.error(error instanceof Error ? error.message : "导出消费明细失败");
+            }
         } finally {
-            setExporting(false);
+            if (exportGuard.finish(ticket)) setExporting(false);
         }
+    };
+
+    const handleClose = () => {
+        exportGuard.cancel();
+        logRequest.current++;
+        rechargeRequest.current++;
+        setExporting(false);
+        setSelectedDetailLog(null);
+        setPreviewVideoUrl(null);
+        onClose();
     };
 
     const handleRefresh = () => {
@@ -195,74 +198,43 @@ export function ConsumptionLogsDrawer({
         }
     };
 
-    useEffect(() => {
-        if (open) {
-            // 打开时或切换用户时，先清空上一个用户的残留数据，防止串号闪烁
-            setLogs([]);
-            setRechargeLogs([]);
-            setKeyword("");
-            setSelectedDetailLog(null);
-            if (initialTab) {
-                setMainTab(initialTab);
-            }
-            void loadConsumptionLogs();
-            void loadRechargeLogs();
-        } else {
-            setLogs([]);
-            setRechargeLogs([]);
-        }
-        return () => {
+    useLayoutEffect(() => {
+        const cancelPending = () => {
+            exportGuard.cancel();
             logRequest.current++;
             rechargeRequest.current++;
         };
-    }, [open, initialTab, token, user?.id]);
+        cancelPending();
+        setExporting(false);
+        setLoadingLogs(false);
+        setLoadingRecharge(false);
+        setLogsAvailable(false);
+        setRechargeAvailable(false);
+        setLogs([]);
+        setRechargeLogs([]);
+        setSelectedDetailLog(null);
+        setPreviewVideoUrl(null);
+        // Epoch notifications fire synchronously, including A -> B -> A before a render.
+        const unsubscribe = subscribeSessionIdentity(() => {
+            if (captureSessionIdentity().epoch !== identityEpoch) {
+                cancelPending();
+                setExporting(false);
+            }
+        });
+        if (open) {
+            setKeyword("");
+            if (initialTab) setMainTab(initialTab);
+            void loadConsumptionLogs();
+            void loadRechargeLogs();
+        }
+        return () => {
+            unsubscribe();
+            cancelPending();
+        };
+    }, [open, initialTab, token, user?.id, identityEpoch, exportGuard]);
 
-    // 消费分类、状态与关键词过滤
-    const filteredLogs = useMemo(() => {
-        let list = logs;
-        if (exportRange !== "all" && exportRange !== "custom") {
-            const now = dayjs();
-            const start = exportRange === "day" ? now.startOf("day") : exportRange === "week" ? now.startOf("week") : exportRange === "month" ? now.startOf("month") : now.startOf("year");
-            const end = exportRange === "day" ? now.endOf("day") : exportRange === "week" ? now.endOf("week") : exportRange === "month" ? now.endOf("month") : now.endOf("year");
-            list = list.filter((item) => {
-                const timestamp = item.submit_time || item.created_at;
-                return timestamp >= start.unix() && timestamp <= end.unix();
-            });
-        }
-        if (category !== "all") {
-            list = list.filter((item) => {
-                const name = (item.model_name || "").toLowerCase();
-                const action = (item.task_action || "").toLowerCase();
-                const isImage = action.includes("图") || name.includes("image") || name.includes("flux") || name.includes("dall") || name.includes("midjourney") || name.includes("seedream");
-                const isVideo = action.includes("视频") || name.includes("video") || name.includes("seedance") || name.includes("kling") || name.includes("sora") || name.includes("hailuo") || name.includes("happyhouse") || name.includes("omni") || name.includes("minimax-h3");
-                const isAudio = action.includes("音频") || name.includes("music") || name.includes("audio") || name.includes("tts") || name.includes("voice") || name.includes("suno") || name.includes("speech");
-
-                if (category === "image") return isImage && !isVideo;
-                if (category === "video") return isVideo;
-                if (category === "audio") return isAudio;
-                return !isImage && !isVideo && !isAudio;
-            });
-        }
-        if (statusFilter !== "all") {
-            list = list.filter((item) => {
-                if (statusFilter === "success") return item.status === "success";
-                if (statusFilter === "failed") return item.status === "failed" || item.type === 5;
-                if (statusFilter === "refunded") return item.status === "refunded" || item.type === 6;
-                return true;
-            });
-        }
-        const kw = keyword.trim().toLowerCase();
-        if (kw) {
-            list = list.filter((item) => {
-                const name = (item.model_name || "").toLowerCase();
-                const taskID = (item.task_id || "").toLowerCase();
-                const action = (item.task_action || "").toLowerCase();
-                const reqID = (item.request_id || "").toLowerCase();
-                return name.includes(kw) || taskID.includes(kw) || action.includes(kw) || reqID.includes(kw);
-            });
-        }
-        return list;
-    }, [logs, category, statusFilter, keyword, exportRange]);
+    // 列表与后台导出共用同一份时间/类别/状态/关键词条件。
+    const filteredLogs = useMemo(() => filterConsumptionLogs(logs, currentFilter), [logs, currentFilter]);
 
     // 统计总积分净消耗（消费为加，失败退款 type===6 自动核减，真实反映实际净扣费）
     const totalPointsSpent = useMemo(() => {
@@ -293,7 +265,7 @@ export function ConsumptionLogsDrawer({
     return (
         <Drawer
             open={open}
-            onClose={onClose}
+            onClose={handleClose}
             title={
                 <div className="flex items-center justify-between gap-3 pr-2">
                     <div className="flex items-center gap-2.5">
@@ -392,13 +364,13 @@ export function ConsumptionLogsDrawer({
                             <div className="rounded-xl border border-stone-200/80 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-900/60">
                                 <div className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400">
                                     <Clock className="size-3.5 text-blue-500" />
-                                    <span>累计历史调用扣费</span>
+                                    <span>当前已加载记录净扣费</span>
                                 </div>
                                 <div className="mt-1.5 font-mono text-2xl font-bold text-stone-900 dark:text-stone-100">
                                     {formatPoints(logsAvailable ? totalPointsSpent : null)}
                                 </div>
                                 <div className="mt-0.5 text-[11px] text-stone-400">
-                                    共计记录 {logs.length} 次生成调用
+                                    当前已加载 {logs.length} 条记录
                                 </div>
                             </div>
                         </div>
@@ -434,11 +406,11 @@ export function ConsumptionLogsDrawer({
                                     <Select size="small" value={exportRange} onChange={setExportRange} options={[{ value: "all", label: "全部时间" }, { value: "day", label: "今天" }, { value: "week", label: "本周" }, { value: "month", label: "本月" }, { value: "year", label: "今年" }, { value: "custom", label: "自定义" }]} className="min-w-24" />
                                     {exportRange === "custom" ? (
                                         <>
-                                            <input aria-label="导出开始时间" type="datetime-local" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-7 rounded-md border border-stone-200 px-1.5 text-[11px] dark:border-stone-700 dark:bg-stone-900" />
-                                            <input aria-label="导出结束时间" type="datetime-local" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-7 rounded-md border border-stone-200 px-1.5 text-[11px] dark:border-stone-700 dark:bg-stone-900" />
+                                            <input aria-label="开始时间（北京时间，含）" type="datetime-local" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-7 rounded-md border border-stone-200 px-1.5 text-[11px] dark:border-stone-700 dark:bg-stone-900" />
+                                            <input aria-label="结束时间（北京时间，不含）" type="datetime-local" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-7 rounded-md border border-stone-200 px-1.5 text-[11px] dark:border-stone-700 dark:bg-stone-900" />
                                         </>
                                     ) : null}
-                                    <button type="button" disabled={exporting} className="rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800" onClick={() => void handleExport()}>{exporting ? "导出中..." : "导出 Excel"}</button>
+                                    <button type="button" disabled={exporting || !token || !user || !currentFilter} aria-busy={exporting} className="rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800" onClick={() => void handleExport()}>{exporting ? "导出中..." : "导出 Excel"}</button>
                                     <div className="w-56">
                                         <Input
                                         prefix={<Search className="size-3 text-stone-400" />}
@@ -451,6 +423,10 @@ export function ConsumptionLogsDrawer({
                                     />
                                     </div>
                                 </div>
+                            </div>
+                            <div className="text-[11px] text-stone-400">
+                                列表显示已加载记录中符合当前时间及筛选的 {filteredLogs.length} 条；导出由后台生成符合相同条件的全量记录及详情。时间按北京时间，周一为每周起点，结束时间不含。
+                                {!bounds ? " 请选择有效的起止时间。" : null}
                             </div>
                             {/* 状态快速过滤 */}
                             <div className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400 pl-0.5">
@@ -504,10 +480,10 @@ export function ConsumptionLogsDrawer({
                                         (log.model_name || "").toLowerCase().includes("flux");
 
                                     const submitTimeStr = log.submit_time || log.created_at
-                                        ? dayjs((log.submit_time || log.created_at) * 1000).format("YYYY-MM-DD HH:mm:ss")
+                                        ? formatConsumptionTime(log.submit_time || log.created_at)
                                         : "-";
                                     const completeTimeStr = log.complete_time && log.complete_time > 0
-                                        ? dayjs(log.complete_time * 1000).format("YYYY-MM-DD HH:mm:ss")
+                                        ? formatConsumptionTime(log.complete_time)
                                         : null;
 
                                     const durSec = log.duration_seconds !== undefined
@@ -927,8 +903,8 @@ export function ConsumptionLogsDrawer({
                             <div>
                                 <span className="text-stone-400">提交时间：</span>
                                 <span className="font-mono ml-1">
-                                    {selectedDetailLog.submit_time
-                                        ? dayjs(selectedDetailLog.submit_time * 1000).format("YYYY-MM-DD HH:mm:ss")
+                                    {selectedDetailLog.submit_time || selectedDetailLog.created_at
+                                        ? formatConsumptionTime(selectedDetailLog.submit_time || selectedDetailLog.created_at)
                                         : "-"}
                                 </span>
                             </div>
@@ -936,7 +912,7 @@ export function ConsumptionLogsDrawer({
                                 <span className="text-stone-400">完成时间：</span>
                                 <span className="font-mono ml-1">
                                     {selectedDetailLog.complete_time && selectedDetailLog.complete_time > 0
-                                        ? dayjs(selectedDetailLog.complete_time * 1000).format("YYYY-MM-DD HH:mm:ss")
+                                        ? formatConsumptionTime(selectedDetailLog.complete_time)
                                         : "-"}
                                 </span>
                             </div>

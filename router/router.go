@@ -116,6 +116,11 @@ func New() *gin.Engine {
 	v1.GET("/user/recharge/status", gin.WrapF(handler.UserRechargeStatus))
 	v1.GET("/user/logs", gin.WrapF(handler.UserConsumptionLogs))
 	v1.GET("/user/logs/export", gin.WrapF(handler.UserConsumptionLogsExport))
+	v1.POST("/user/logs/export/prepare", gin.WrapF(handler.PrepareUserConsumptionExport))
+	v1.DELETE("/user/logs/export/pending", gin.WrapF(handler.CancelPendingConsumptionExports))
+	api.GET("/v1/user/logs/export/download/:id", func(c *gin.Context) {
+		handler.DownloadUserConsumptionExport(c.Writer, c.Request, c.Param("id"))
+	})
 	v1.GET("/user/recharge-logs", gin.WrapF(handler.UserRechargeLogs))
 	v1.GET("/model-pricing", gin.WrapF(handler.ModelPricing))
 	v1.GET("/canvas/projects", gin.WrapF(handler.UserCanvasProjects))

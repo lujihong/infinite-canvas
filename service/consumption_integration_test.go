@@ -44,9 +44,9 @@ func TestConsumptionDisplayWalletAndLogHTTPAgreement(t *testing.T) {
 				t.Errorf("missing required time range")
 			}
 			if r.URL.Query().Get("before_id") == "" {
-				fmt.Fprint(w, `{"data":{"items":[{"id":5,"type":5,"quota":0,"model_name":"text"},{"id":4,"type":6,"quota":1,"model_name":"text"},{"id":3,"type":5,"quota":1000,"model_name":"text","content":"upstream failed"}],"total":5,"snapshot_id":5,"next_before_id":3,"has_more":true}}`)
+				fmt.Fprint(w, `{"data":{"items":[{"id":5,"type":5,"quota":0,"created_at":50,"model_name":"text"},{"id":4,"type":6,"quota":1,"created_at":50,"model_name":"text"},{"id":3,"type":5,"quota":1000,"created_at":50,"model_name":"text","content":"upstream failed"}],"total":5,"snapshot_id":5,"next_before_id":3,"has_more":true}}`)
 			} else {
-				fmt.Fprint(w, `{"success":true,"data":{"items":[{"id":2,"type":2,"quota":1,"model_name":"text"},{"id":1,"type":2,"quota":1000,"model_name":"text"}],"total":5,"snapshot_id":5,"next_before_id":1,"has_more":false}}`)
+				fmt.Fprint(w, `{"success":true,"data":{"items":[{"id":2,"type":2,"quota":1,"created_at":50,"model_name":"text"},{"id":1,"type":2,"quota":1000,"created_at":50,"model_name":"text"}],"total":5,"snapshot_id":5,"next_before_id":1,"has_more":false}}`)
 			}
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
@@ -59,7 +59,7 @@ func TestConsumptionDisplayWalletAndLogHTTPAgreement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs, err := FetchUserConsumptionLogs(user.ID)
+	logs, err := FetchUserConsumptionLogsRange(user.ID, 1, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

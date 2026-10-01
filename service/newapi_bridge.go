@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -898,118 +897,37 @@ func FetchUserConsumptionLogs(userID string) ([]ConsumptionLogItem, error) {
 	return FetchUserConsumptionLogsRange(userID, end-365*24*60*60, end)
 }
 
-// FetchUserConsumptionLogsRange 查询指定的半开区间 [start,end)，用于列表和导出。
+// FetchUserConsumptionLogsRange keeps the list API contract; export consumes batches directly.
 func FetchUserConsumptionLogsRange(userID string, start, end int64) ([]ConsumptionLogItem, error) {
-	if start <= 0 || end <= start {
-		return nil, errors.New("消费明细时间范围无效")
+	logs := make([]ConsumptionLogItem, 0)
+	err := IterateUserConsumptionLogs(context.Background(), userID, start, end, func(batch []ConsumptionLogItem) error {
+		logs = append(logs, batch...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	token := GetUserExclusiveNewAPIToken(userID)
-	if token == "" {
-		return []ConsumptionLogItem{}, nil
-	}
+	return logs, nil
+}
 
-	_, quotaPerUnit := getNewAPISystemStatus()
-	if quotaPerUnit <= 0 {
-		quotaPerUnit = 500000
-	}
-
-	// 1. 查询本地最近的视频任务，建立任务ID和完成时间关联索引
-	localTasks, _ := repository.ListRecentUserVideoTasks(userID, 0)
+func mapConsumptionLogs(allLogs []upstreamTokenLog, localTasks []model.VideoTask, token string, quotaPerUnit int64, start, end int64, includeRunning bool) []ConsumptionLogItem {
 	localTaskByUpstreamID := make(map[string]model.VideoTask)
 	localRunningTasks := make([]model.VideoTask, 0)
 	for _, t := range localTasks {
-		if t.UpstreamTaskID != "" {
-			localTaskByUpstreamID[t.UpstreamTaskID] = t
+		for _, key := range []string{t.UpstreamTaskID, t.UpstreamVideoID, t.ID} {
+			if key != "" {
+				if _, exists := localTaskByUpstreamID[key]; !exists {
+					localTaskByUpstreamID[key] = t
+				}
+			}
 		}
-		if t.Status == "queued" || t.Status == "in_progress" || t.Status == "processing" || t.Status == "running" {
+		if includeRunning && (t.Status == "queued" || t.Status == "in_progress" || t.Status == "processing" || t.Status == "running") {
 			if created, parseErr := time.Parse(time.RFC3339, t.CreatedAt); parseErr == nil {
 				createdAt := created.Unix()
 				if createdAt >= start && createdAt < end {
 					localRunningTasks = append(localRunningTasks, t)
 				}
-			} else {
-				localRunningTasks = append(localRunningTasks, t)
 			}
-		}
-	}
-
-	type upstreamTokenLog struct {
-		ID                int    `json:"id"`
-		CreatedAt         int64  `json:"created_at"`
-		ModelName         string `json:"model_name"`
-		Type              int    `json:"type"`
-		Quota             int64  `json:"quota"`
-		PromptTokens      int    `json:"prompt_tokens"`
-		CompletionTokens  int    `json:"completion_tokens"`
-		UseTime           int    `json:"use_time"`
-		IsStream          bool   `json:"is_stream"`
-		Content           string `json:"content"`
-		RequestID         string `json:"request_id"`
-		UpstreamRequestID string `json:"upstream_request_id"`
-		Other             string `json:"other"`
-	}
-	type tokenLogPage struct {
-		// New-API success responses expose the payload with HTTP 200 and may omit
-		// the legacy success boolean; only an explicit false is a business failure.
-		Success *bool `json:"success"`
-		Data    struct {
-			Items        []upstreamTokenLog `json:"items"`
-			Total        int64              `json:"total"`
-			SnapshotID   int                `json:"snapshot_id"`
-			NextBeforeID int                `json:"next_before_id"`
-			HasMore      bool               `json:"has_more"`
-		} `json:"data"`
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	allLogs := make([]upstreamTokenLog, 0)
-	snapshotID, beforeID := 0, 0
-	for page := 0; page < 1000; page++ {
-		query := url.Values{
-			"start_timestamp": {strconv.FormatInt(start, 10)},
-			"end_timestamp":   {strconv.FormatInt(end, 10)},
-			"limit":           {"1000"},
-		}
-		if snapshotID > 0 {
-			query.Set("snapshot_id", strconv.Itoa(snapshotID))
-		}
-		if beforeID > 0 {
-			query.Set("before_id", strconv.Itoa(beforeID))
-		}
-		req, err := http.NewRequest(http.MethodGet, getNewAPIBaseURL()+"/api/log/token/page?"+query.Encode(), nil)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Host", "api.xybcloud.com")
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("请求消费明细失败: %w", err)
-		}
-		var res tokenLogPage
-		decodeErr := json.NewDecoder(resp.Body).Decode(&res)
-		resp.Body.Close()
-		if decodeErr != nil {
-			return nil, fmt.Errorf("解析消费明细失败: %w", decodeErr)
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 || (res.Success != nil && !*res.Success) {
-			return nil, fmt.Errorf("中转站消费明细接口失败: HTTP %d", resp.StatusCode)
-		}
-		if page == 0 {
-			snapshotID = res.Data.SnapshotID
-		} else if res.Data.SnapshotID != snapshotID {
-			return nil, errors.New("消费明细分页快照发生变化，已中止导出")
-		}
-		allLogs = append(allLogs, res.Data.Items...)
-		if !res.Data.HasMore {
-			break
-		}
-		if res.Data.NextBeforeID <= 0 || res.Data.NextBeforeID >= beforeID && beforeID > 0 {
-			return nil, errors.New("中转站消费明细游标无效，已中止导出")
-		}
-		beforeID = res.Data.NextBeforeID
-		if page == 999 {
-			return nil, errors.New("消费明细超过安全分页上限，请缩小时间范围")
 		}
 	}
 
@@ -1237,7 +1155,7 @@ func FetchUserConsumptionLogsRange(userID string, start, end int64) ([]Consumpti
 		})
 	}
 
-	return logs, nil
+	return logs
 }
 
 type RechargeLogItem struct {
