@@ -110,6 +110,10 @@ func ConsumptionDisplayRow(item ConsumptionLogItem) []any {
 	if taskID == "" {
 		taskID = "即时API调用"
 	}
+	duration := item.DurationSeconds
+	if duration <= 0 && item.UseTime > 0 {
+		duration = float64(item.UseTime) / 1000
+	}
 	status := item.StatusLabel
 	if status == "" {
 		status = "成功"
@@ -119,7 +123,7 @@ func ConsumptionDisplayRow(item ConsumptionLogItem) []any {
 	}
 	amount, detail := ConsumptionCostPresentation(item)
 	row := []any{consumptionDate(submit), consumptionDate(item.CompleteTime), modelName, action, taskID,
-		strconv.FormatFloat(item.DurationSeconds, 'f', 1, 64) + " 秒", status, strconv.Itoa(item.Progress) + "%", amount, detail,
+		strconv.FormatFloat(duration, 'f', 1, 64) + " 秒", status, strconv.Itoa(item.Progress) + "%", amount, detail,
 		nil, nil, nil, nil, nil, nil, nil}
 	if item.PromptTokens > 0 {
 		row[10] = item.PromptTokens
