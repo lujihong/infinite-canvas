@@ -209,56 +209,85 @@ func buildConsumptionExport(ctx context.Context, filename string, filter service
 	if _, err = spool.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	book := excelize.NewFile(excelize.Options{TmpDir: dir})
-	defer book.Close()
-	if err = book.SetSheetName(book.GetSheetName(0), "消费明细"); err != nil {
-		return err
-	}
-	stream, err := book.NewStreamWriter("消费明细")
-	if err != nil {
-		return err
-	}
-	headers := make([]any, 0, len(visible))
-	for i, on := range visible {
-		if on {
-			headers = append(headers, service.ConsumptionColumns[i].Label)
-		}
-	}
-	if err = stream.SetRow("A1", headers); err != nil {
-		return err
-	}
-	decoder := json.NewDecoder(bufio.NewReaderSize(spool, 64<<10))
-	decoder.UseNumber()
-	for rowNo := 2; rowNo < count+2; rowNo++ {
-		if err = ctx.Err(); err != nil {
+		book := excelize.NewFile(excelize.Options{TmpDir: dir})
+		defer book.Close()
+		if err = book.SetSheetName(book.GetSheetName(0), "消费明细"); err != nil {
 			return err
 		}
-		var raw []any
-		if err = decoder.Decode(&raw); err != nil {
+		stream, err := book.NewStreamWriter("消费明细")
+		if err != nil {
 			return err
 		}
-		if len(raw) != len(visible) {
-			return errors.New("导出暂存字段损坏")
-		}
-		row := make([]any, 0, len(headers))
+		wrapStyleID, _ := book.NewStyle(&excelize.Style{
+			Alignment: &excelize.Alignment{
+				WrapText: true,
+				Vertical: "center",
+			},
+		})
+		headerStyleID, _ := book.NewStyle(&excelize.Style{
+			Font: &excelize.Font{Bold: true},
+			Alignment: &excelize.Alignment{
+				Horizontal: "center",
+				Vertical:   "center",
+				WrapText:   true,
+			},
+		})
+
+		headers := make([]any, 0, len(visible))
+		colIdx := 1
 		for i, on := range visible {
-			if !on {
-				continue
-			}
-			value := raw[i]
-			if number, ok := value.(json.Number); ok {
-				n, e := number.Int64()
-				if e != nil {
-					return e
+			if on {
+				col := service.ConsumptionColumns[i]
+				headers = append(headers, col.Label)
+				if col.Width > 0 {
+					_ = stream.SetColWidth(colIdx, colIdx, col.Width)
 				}
-				value = n
+				colIdx++
 			}
-			row = append(row, value)
 		}
-		if err = stream.SetRow("A"+strconv.Itoa(rowNo), row); err != nil {
+		headerOpts := excelize.RowOpts{Height: 26}
+		if headerStyleID > 0 {
+			headerOpts.StyleID = headerStyleID
+		}
+		if err = stream.SetRow("A1", headers, headerOpts); err != nil {
 			return err
 		}
-	}
+		dataOpts := excelize.RowOpts{}
+		if wrapStyleID > 0 {
+			dataOpts.StyleID = wrapStyleID
+		}
+		decoder := json.NewDecoder(bufio.NewReaderSize(spool, 64<<10))
+		decoder.UseNumber()
+		for rowNo := 2; rowNo < count+2; rowNo++ {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			var raw []any
+			if err = decoder.Decode(&raw); err != nil {
+				return err
+			}
+			if len(raw) != len(visible) {
+				return errors.New("导出暂存字段损坏")
+			}
+			row := make([]any, 0, len(headers))
+			for i, on := range visible {
+				if !on {
+					continue
+				}
+				value := raw[i]
+				if number, ok := value.(json.Number); ok {
+					n, e := number.Int64()
+					if e != nil {
+						return e
+					}
+					value = n
+				}
+				row = append(row, value)
+			}
+			if err = stream.SetRow("A"+strconv.Itoa(rowNo), row, dataOpts); err != nil {
+				return err
+			}
+		}
 	if err = stream.Flush(); err != nil {
 		return err
 	}

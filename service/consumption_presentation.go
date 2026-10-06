@@ -14,13 +14,27 @@ import (
 type ConsumptionColumn struct {
 	Label  string
 	Always bool
+	Width  float64
 }
 
 var ConsumptionColumns = []ConsumptionColumn{
-	{"提交时间", true}, {"完成时间", true}, {"模型", true}, {"操作类型", true},
-	{"任务标识", true}, {"任务耗时", true}, {"任务状态", true}, {"任务进度", true},
-	{"积分结算", true}, {"积分说明", true}, {"输入词元数", false}, {"输出词元数", false},
-	{"请求标识", false}, {"失败原因", false}, {"退款说明", false}, {"异常详情", false}, {"视频地址", false},
+	{"提交时间", true, 20},
+	{"完成时间", true, 20},
+	{"模型", true, 22},
+	{"操作类型", true, 16},
+	{"任务ID", true, 36},
+	{"耗时", true, 12},
+	{"状态", true, 14},
+	{"进度", true, 10},
+	{"积分结算", true, 16},
+	{"积分说明", true, 40},
+	{"输入 Tokens", false, 16},
+	{"输出 Tokens", false, 16},
+	{"请求ID", false, 38},
+	{"失败原因", false, 35},
+	{"退款说明", false, 35},
+	{"异常详情", false, 40},
+	{"视频地址", false, 35},
 }
 
 func consumptionPoints(points float64, prefix string) string {

@@ -38,9 +38,13 @@ func TestConsumptionExportVisibleColumnsAndAmounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"提交时间", "完成时间", "模型", "操作类型", "任务标识", "任务耗时", "任务状态", "任务进度", "积分结算", "积分说明", "输出词元数", "请求标识", "失败原因", "异常详情", "视频地址"}
+	want := []string{"提交时间", "完成时间", "模型", "操作类型", "任务ID", "耗时", "状态", "进度", "积分结算", "积分说明", "输出 Tokens", "请求ID", "失败原因", "异常详情", "视频地址"}
 	if !reflect.DeepEqual(rows[0], want) {
 		t.Fatalf("headers %q", rows[0])
+	}
+	width, _ := book.GetColWidth("消费明细", "E")
+	if width < 30 {
+		t.Fatalf("col width E too small: %v", width)
 	}
 	if rows[1][0] != "2024-01-01 08:00:00" || rows[1][4] != "000123456789123456789" || rows[1][8] != "-0.414 积分" {
 		t.Fatal(rows[1])
