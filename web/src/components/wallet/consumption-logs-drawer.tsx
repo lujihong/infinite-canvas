@@ -73,6 +73,18 @@ export function ConsumptionLogsDrawer({
     const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
     const [selectedDetailLog, setSelectedDetailLog] = useState<ConsumptionLogItem | null>(null);
 
+    const handleExportRangeChange = (value: typeof exportRange) => {
+        setExportRange(value);
+        if (value === "custom") {
+            if (!customStart) {
+                setCustomStart(dayjs().startOf("day").format("YYYY-MM-DDTHH:mm"));
+            }
+            if (!customEnd) {
+                setCustomEnd(dayjs().format("YYYY-MM-DDTHH:mm"));
+            }
+        }
+    };
+
     // 充值记录状态（严格单用户隔离）
     const [rechargeLogs, setRechargeLogs] = useState<RechargeLogItem[]>([]);
     const [loadingRecharge, setLoadingRecharge] = useState(false);
@@ -375,55 +387,95 @@ export function ConsumptionLogsDrawer({
                             </div>
                         </div>
 
-                        {/* 筛选与搜索 */}
-                        <div className="flex flex-col gap-2 border-b border-stone-200/80 pb-3 dark:border-stone-800/80">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="inline-flex rounded-lg border border-stone-200 bg-stone-100/70 p-0.5 dark:border-stone-700 dark:bg-stone-800/60 text-xs">
-                                    {[
-                                        { key: "all", label: "全部类别" },
-                                        { key: "video", label: "视频渲染", icon: Video },
-                                        { key: "image", label: "图像生成", icon: ImageIcon },
-                                        { key: "audio", label: "音频合成", icon: Music2 },
-                                        { key: "text", label: "文本对话", icon: FileText },
-                                    ].map((tab) => (
-                                        <button
-                                            key={tab.key}
-                                            type="button"
-                                            onClick={() => setCategory(tab.key as typeof category)}
-                                            className={`flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition cursor-pointer ${
-                                                category === tab.key
-                                                    ? "bg-white text-stone-900 shadow-xs dark:bg-stone-700 dark:text-white"
-                                                    : "text-stone-500 hover:text-stone-800 dark:hover:text-stone-300"
-                                            }`}
-                                        >
-                                            {tab.icon ? <tab.icon className="size-3" /> : null}
-                                            <span>{tab.label}</span>
-                                        </button>
-                                    ))}
-                                </div>
+                            {/* 筛选与搜索 */}
+                            <div className="flex flex-col gap-2.5 border-b border-stone-200/80 pb-3 dark:border-stone-800/80">
+                                {/* 第一行：类别切换 + 搜索框 */}
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="inline-flex rounded-lg border border-stone-200 bg-stone-100/70 p-0.5 dark:border-stone-700 dark:bg-stone-800/60 text-xs">
+                                        {[
+                                            { key: "all", label: "全部类别" },
+                                            { key: "video", label: "视频渲染", icon: Video },
+                                            { key: "image", label: "图像生成", icon: ImageIcon },
+                                            { key: "audio", label: "音频合成", icon: Music2 },
+                                            { key: "text", label: "文本对话", icon: FileText },
+                                        ].map((tab) => (
+                                            <button
+                                                key={tab.key}
+                                                type="button"
+                                                onClick={() => setCategory(tab.key as typeof category)}
+                                                className={`flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition cursor-pointer ${
+                                                    category === tab.key
+                                                        ? "bg-white text-stone-900 shadow-xs dark:bg-stone-700 dark:text-white"
+                                                        : "text-stone-500 hover:text-stone-800 dark:hover:text-stone-300"
+                                                }`}
+                                            >
+                                                {tab.icon ? <tab.icon className="size-3" /> : null}
+                                                <span>{tab.label}</span>
+                                            </button>
+                                        ))}
+                                    </div>
 
-                                <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-                                    <Select size="small" value={exportRange} onChange={setExportRange} options={[{ value: "all", label: "全部时间" }, { value: "day", label: "今天" }, { value: "week", label: "本周" }, { value: "month", label: "本月" }, { value: "year", label: "今年" }, { value: "custom", label: "自定义" }]} className="min-w-24" />
-                                    {exportRange === "custom" ? (
-                                        <>
-                                            <input aria-label="开始时间（北京时间，含）" type="datetime-local" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-7 rounded-md border border-stone-200 px-1.5 text-[11px] dark:border-stone-700 dark:bg-stone-900" />
-                                            <input aria-label="结束时间（北京时间，不含）" type="datetime-local" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-7 rounded-md border border-stone-200 px-1.5 text-[11px] dark:border-stone-700 dark:bg-stone-900" />
-                                        </>
-                                    ) : null}
-                                    <button type="button" disabled={exporting || !token || !user || !currentFilter} aria-busy={exporting} className="rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800" onClick={() => void handleExport()}>{exporting ? "导出中..." : "导出 Excel"}</button>
                                     <div className="w-56">
                                         <Input
-                                        prefix={<Search className="size-3 text-stone-400" />}
-                                        placeholder="搜索任务 ID 或模型..."
-                                        size="small"
-                                        allowClear
-                                        value={keyword}
-                                        onChange={(e) => setKeyword(e.target.value)}
-                                        className="!rounded-lg text-xs"
-                                    />
+                                            prefix={<Search className="size-3 text-stone-400" />}
+                                            placeholder="搜索任务 ID 或模型..."
+                                            size="small"
+                                            allowClear
+                                            value={keyword}
+                                            onChange={(e) => setKeyword(e.target.value)}
+                                            className="!rounded-lg text-xs"
+                                        />
                                     </div>
                                 </div>
-                            </div>
+
+                                {/* 第二行：时间范围选择（自定义时自然向右展开）+ 导出按钮 */}
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                        <Select
+                                            size="small"
+                                            value={exportRange}
+                                            onChange={handleExportRangeChange}
+                                            options={[
+                                                { value: "all", label: "全部时间" },
+                                                { value: "day", label: "今天" },
+                                                { value: "week", label: "本周" },
+                                                { value: "month", label: "本月" },
+                                                { value: "year", label: "今年" },
+                                                { value: "custom", label: "自定义" },
+                                            ]}
+                                            className="min-w-24"
+                                        />
+                                        {exportRange === "custom" ? (
+                                            <div className="flex items-center gap-1.5 text-xs text-stone-400">
+                                                <input
+                                                    aria-label="开始时间（北京时间，含）"
+                                                    type="datetime-local"
+                                                    value={customStart}
+                                                    onChange={(e) => setCustomStart(e.target.value)}
+                                                    className="h-7 rounded-md border border-stone-200 bg-white px-2 text-[11px] text-stone-800 focus:border-amber-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200"
+                                                />
+                                                <span className="text-stone-400 text-xs">至</span>
+                                                <input
+                                                    aria-label="结束时间（北京时间，不含）"
+                                                    type="datetime-local"
+                                                    value={customEnd}
+                                                    onChange={(e) => setCustomEnd(e.target.value)}
+                                                    className="h-7 rounded-md border border-stone-200 bg-white px-2 text-[11px] text-stone-800 focus:border-amber-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200"
+                                                />
+                                            </div>
+                                        ) : null}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        disabled={exporting || !token || !user || !currentFilter}
+                                        aria-busy={exporting}
+                                        className="cursor-pointer rounded-lg border border-stone-200 px-3 py-1 text-xs font-semibold text-stone-600 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800 transition"
+                                        onClick={() => void handleExport()}
+                                    >
+                                        {exporting ? "导出中..." : "导出 Excel"}
+                                    </button>
+                                </div>
                             <div className="text-[11px] text-stone-400">
                                 列表显示已加载记录中符合当前时间及筛选的 {filteredLogs.length} 条；导出由后台生成符合相同条件的全量记录及详情。时间按北京时间，周一为每周起点，结束时间不含。
                                 {!bounds ? " 请选择有效的起止时间。" : null}

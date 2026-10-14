@@ -280,6 +280,7 @@ function isVideoModelName(model: string) {
     return (
         value.includes("video") ||
         value.includes("seedance") ||
+        value.includes("moma") ||
         value.includes("sora") ||
         value.includes("veo") ||
         value.includes("kling") ||

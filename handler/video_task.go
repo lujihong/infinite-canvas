@@ -349,14 +349,15 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 		saveAIProxyLog(logContext, 0, "", err.Error())
 		return service.VideoTaskPollUpdate{}, err
 	}
-	if status >= http.StatusBadRequest {
-		message := readUpstreamAIErrorMessage(payload, status)
-		saveAIProxyLog(logContext, status, string(payload), strings.TrimSpace(string(payload)))
-		if status == http.StatusTooManyRequests {
-			return service.VideoTaskPollUpdate{Status: task.Status, ErrorDetail: message, ResponseBody: string(payload)}, nil
+		if status >= http.StatusBadRequest {
+			message := readUpstreamAIErrorMessage(payload, status)
+			saveAIProxyLog(logContext, status, string(payload), strings.TrimSpace(string(payload)))
+			// 资金安全防线：遇服务端 5xx 网络超时或 429 限流时保持任务当前状态继续轮询，严禁直接判死导致用户误判反复点击刷爆余额
+			if status >= http.StatusInternalServerError || status == http.StatusBadGateway || status == http.StatusGatewayTimeout || status == http.StatusTooManyRequests {
+				return service.VideoTaskPollUpdate{Status: task.Status, ErrorDetail: message, ResponseBody: string(payload)}, nil
+			}
+			return service.VideoTaskPollUpdate{Status: "failed", Error: message, ErrorDetail: message, ResponseBody: string(payload)}, nil
 		}
-		return service.VideoTaskPollUpdate{Status: "failed", Error: message, ErrorDetail: message, ResponseBody: string(payload)}, nil
-	}
 	transformed := transformVideoStatusPayload(payload, request, channel, task.Model)
 	parsed := parseVideoTaskPayload(transformed, task.Model)
 	if parsed.Status == "failed" && parsed.Error == "" {

@@ -28,6 +28,17 @@ type ModelPickerProps = {
     onMissingConfig?: () => void;
 };
 
+export function resolveDisplayChannelName(model: string, optionChannelName?: string): string {
+    const m = model.toLowerCase();
+    if (m === "moma-1-seedance-2.0") return "极速专线（一区）";
+    if (m === "moma-2-seedance-2.0") return "高可用专线（二区）";
+    if (m === "moma-3-seedance-2.0" || m === "doubao-3-seedance-2.0" || m === "doubao-3-seedance-2.5") return "旗舰专线（三区）";
+    if (optionChannelName && optionChannelName.includes("专线")) {
+        return optionChannelName;
+    }
+    return "";
+}
+
 export function ModelPicker({
     config,
     value,
@@ -292,6 +303,7 @@ export function ModelPicker({
                     displayOptions.map((option) => {
                         const isSelected = option.model === value && (!channelId || option.channelId === channelId);
                         const pricing = getModelPricingForRequest(config, option.model);
+                        const optionChannelTag = resolveDisplayChannelName(option.model, option.channelName);
                         return (
                             <button
                                 key={option.key}
@@ -305,7 +317,7 @@ export function ModelPicker({
                                         : "border-transparent text-stone-700 hover:bg-stone-100/80 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-stone-800/80 dark:hover:text-white"
                                 )}
                             >
-                                {/* 第一行：模型图标 + 模型名（粗体、自动换行） */}
+                                {/* 第一行：模型图标 + 模型名 + 渠道标识 */}
                                 <div className="flex items-start justify-between gap-1.5 w-full">
                                     <span className="flex items-start gap-1.5 min-w-0 flex-1">
                                         <span className="mt-0.5 shrink-0">
@@ -315,10 +327,17 @@ export function ModelPicker({
                                             {option.model}
                                         </span>
                                     </span>
-                                    {isSelected ? <Check className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" /> : null}
+                                    <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                                        {optionChannelTag ? (
+                                            <span className="rounded bg-amber-500/10 dark:bg-amber-950/40 border border-amber-500/20 px-1.5 py-0.2 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                                                {optionChannelTag}
+                                            </span>
+                                        ) : null}
+                                        {isSelected ? <Check className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0" /> : null}
+                                    </div>
                                 </div>
 
-                                {/* 第二行：计费单价 + 渠道信息（次级弱化展示） */}
+                                {/* 第二行：计费单价展示（不再重复显示渠道名称） */}
                                 <div className="flex items-center justify-between gap-2 pl-5 text-[11px] text-stone-400 dark:text-stone-500">
                                     <span>
                                         {pricing ? (
@@ -329,11 +348,6 @@ export function ModelPicker({
                                             <span>{personalPricing.loading ? "本人报价加载中" : personalPricing.error || "本人报价暂不可用"}</span>
                                         )}
                                     </span>
-                                    {option.channelName ? (
-                                        <span className="truncate text-[10px] opacity-75">
-                                            {option.channelName}
-                                        </span>
-                                    ) : null}
                                 </div>
                                 {pricing?.discount ? <span className="pl-5 text-[10px]">本人优惠倍率 {pricing.discount.factor}</span> : null}
                                 {pricing ? <span className="pl-5 text-[10px] whitespace-pre-line opacity-75">{pricing.group_quotes.map(quote => `${quote.group}：${quote.formatted_points_cost}（最终倍率 ${quote.final_ratio}）`).join("\n")}{"\n"}{pricing.billing_mode === "tiered_expr" || pricing.billing_expr ? "表达式计费，按实际用量结算。" : "估算报价，实际计费组由路由决定。"}</span> : null}
@@ -387,7 +401,7 @@ export function ModelPicker({
             >
                 <span className="flex min-w-0 items-center gap-2 truncate">
                     <ModelIcon model={currentDisplayModel} />
-                    <span className="truncate">{currentDisplayModel || placeholder}</span>
+                    <span className="truncate font-medium">{currentDisplayModel || placeholder}</span>
                 </span>
                 <ChevronDown className="size-3.5 shrink-0 text-stone-400 opacity-70" />
             </button>

@@ -1,6 +1,14 @@
 import { modelKey } from "@/lib/video-model-capabilities";
 
-const DEFAULT_AUDIO_MODELS = new Set(["moma-seedance-2-0", "nm-moma-seedance-2-0"]);
+const DEFAULT_AUDIO_MODELS = new Set([
+    "moma-seedance-2-0",
+    "nm-moma-seedance-2-0",
+    "moma-1-seedance-2-0",
+    "moma-2-seedance-2-0",
+    "moma-3-seedance-2-0",
+    "doubao-3-seedance-2-0",
+    "doubao-3-seedance-2-5",
+]);
 
 export type VideoAudioPreferences = Record<string, boolean>;
 

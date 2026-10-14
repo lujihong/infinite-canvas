@@ -107,15 +107,15 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
                 <div className="flex w-full rounded-lg bg-stone-100 p-1 dark:bg-stone-900">
                     {(["LivenessFace","AIGC"] as const).map(value => <Button key={value} type={type === value ? "primary" : "text"} className="min-w-0 flex-1 !rounded-md" onClick={() => {setType(value);setSelected(null);setGroupPage(1);setAssetPage(1);}}>{value === "LivenessFace" ? "真人肖像" : "虚拟人物"}</Button>)}
                 </div>
-                {channels.length > 1 ? <div className="grid gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center"><span className="text-xs text-stone-500 dark:text-stone-400">素材所属渠道</span><Select size="middle" className="w-full" value={activeChannelId} options={channels.map((c) => ({ value: c.id, label: `${c.name}（${c.region || "专线"}）` }))} onChange={(val) => {setSelectedChannelId(val);setSelected(null);setGroupPage(1);setAssetPage(1);}} /></div> : channels[0] ? <div className="flex min-w-0 items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400"><Radio className="size-3 text-emerald-500" />接入专线：<strong className="truncate font-medium text-stone-700 dark:text-stone-300">{channels[0].name}</strong></div> : null}
+                {channels.length > 1 ? <div className="grid gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center"><span className="text-xs text-stone-500 dark:text-stone-400">素材所属渠道</span><Select size="middle" className="w-full" value={activeChannelId} options={channels.map((c) => ({ value: c.id, label: c.name }))} onChange={(val) => {setSelectedChannelId(val);setSelected(null);setGroupPage(1);setAssetPage(1);}} /></div> : channels[0] ? <div className="flex min-w-0 items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400"><Radio className="size-3 text-emerald-500" />接入渠道：<strong className="truncate font-medium text-stone-700 dark:text-stone-300">{channels[0].name}</strong></div> : null}
             </div>
             <Button className="w-full sm:w-auto" disabled={!channelReady} loading={busy} onClick={() => void begin()}>{channels.length > 1 && activeChannel ? `在「${activeChannel.name}」发起认证` : "发起真人认证"}</Button>
         </div>
         <div className="grid gap-2 rounded-lg border border-dashed border-stone-200 px-3 py-2.5 text-xs leading-5 text-stone-500 dark:border-stone-800 dark:text-stone-400">
-            <p>素材来自移动云，仅展示当前账号有权访问的素材。选用后会自动带入资产引用，不需要手动复制 ID。</p>
-            <p>认证成功后，可在同一人物组继续添加本人的素材；移动云会进行同人一致性与最终入库校验，认证或上传成功不保证素材入库成功。</p>
+            <p>真人素材仅展示当前账号已实名认证并有权访问的素材。选用后会自动带入资产引用，不需要手动复制 ID。</p>
+            <p>认证成功后，可在同一人物组继续添加本人的素材；系统会进行同人一致性与最终入库校验，认证或上传成功不保证素材入库成功。</p>
         </div>
-        {!selectionEnabled && <Alert type="info" showIcon message="当前模型不支持移动云素材。请先选择支持的 Seedance 模型，再选用素材。" />}
+        {!selectionEnabled && <Alert type="info" showIcon message="当前模型不支持人物素材。请先选择支持的模型，再选用素材。" />}
         {failure && <Alert type="error" showIcon message={failure} />}
         {session && <section className="grid gap-4 rounded-xl border border-stone-200 bg-stone-50/60 p-4 dark:border-stone-700 dark:bg-stone-900/40 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
             <div className="mx-auto sm:mx-0"><QRCode value={session.h5Link} size={144} status={seconds ? "active" : "expired"} onRefresh={() => void begin()} /></div>
@@ -132,13 +132,13 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-stone-50 px-3 py-2 dark:bg-stone-900/60"><span className="text-xs leading-5 text-stone-500 dark:text-stone-400">处理中每 10 秒检查，最多 12 次；页面不可见时暂停，可手动刷新。</span><Button size="small" onClick={refreshAssets}>刷新素材</Button></div>
             {assets.isError ? <Alert type="error" message={errorText(assets.error)} /> : assets.isLoading ? <Spin /> : !assets.data?.data.length ? <Empty description="本页暂无素材" /> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">{assets.data.data.map(asset=>{
                 const matchedChannel = Array.isArray(channels) ? channels.find(c => c.id === (asset.channelId || activeChannelId)) : undefined;
-                const channelTag = matchedChannel ? matchedChannel.name : "移动云专线";
+                const channelTag = matchedChannel ? matchedChannel.name : "官方渠道";
                 return (
                     <article key={asset.assetId} className="min-w-0 overflow-hidden rounded-xl border border-stone-200 bg-background p-3 shadow-sm dark:border-stone-700">
                         <div className="mb-3 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-stone-100 dark:bg-stone-900">
                             {asset.assetUrl && /^https?:\/\//.test(asset.assetUrl) ? asset.assetType === "Image" ? <img src={asset.assetUrl} alt={asset.assetName} loading="lazy" className="h-full w-full object-contain" /> : asset.assetType === "Video" ? <video src={asset.assetUrl} aria-label={asset.assetName} controls playsInline preload="none" className="h-full w-full object-contain" /> : <audio src={asset.assetUrl} aria-label={asset.assetName} controls preload="none" className="w-full" /> : <span className="text-xs text-stone-500">暂无预览</span>}
                         </div>
-                        <div className="space-y-2"><div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 truncate text-xs font-medium" title={asset.assetName}>{asset.assetName||"未命名素材"}</span><div className="flex shrink-0 flex-wrap justify-end gap-1"><Tag color="cyan" title={`专线ID: ${asset.channelId || activeChannelId}`}>{channelTag}</Tag><Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag></div></div><Button className="w-full" type="primary" disabled={!selectionEnabled || asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button></div>
+                        <div className="space-y-2"><div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 truncate text-xs font-medium" title={asset.assetName}>{asset.assetName||"未命名素材"}</span><div className="flex shrink-0 flex-wrap justify-end gap-1"><Tag color="cyan">{channelTag}</Tag><Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag></div></div><Button className="w-full" type="primary" disabled={!selectionEnabled || asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button></div>
                     </article>
                 );
             })}</div>}
