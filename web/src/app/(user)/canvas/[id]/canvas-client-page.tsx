@@ -4722,6 +4722,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     allowAicc
                     open={assetPickerOpen}
                     defaultTab={assetPickerTab}
+                    currentModel={(() => {
+                        const targetNode = nodes.find(n => n.id === referenceTargetNodeIdRef.current || n.id === replacingNodeIdRef.current);
+                        return targetNode?.metadata?.model || effectiveConfig.videoModel || effectiveConfig.model;
+                    })()}
                     onInsert={handleAssetInsert}
                     onClose={() => {
                         assetInsertPositionRef.current = null;

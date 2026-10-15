@@ -344,14 +344,29 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
     const aiccReferences = [...input.references, ...input.videoReferences, ...input.audioReferences, input.firstFrame, input.lastFrame].filter(item => item?.aiccUri);
     if (aiccReferences.length) {
-        if (!model.toLowerCase().includes("seedance")) throw new VideoRequestError("移动云素材仅支持 Seedance 视频模型，请切换模型或移除素材");
-        if (!usesAccountProxy(config) || !useUserStore.getState().token) throw new VideoRequestError("请登录后使用移动云素材，素材归属由服务端校验");
-        if (aiccReferences.some(item => !Number.isSafeInteger(item?.aiccChannelId) || (item?.aiccChannelId ?? 0) <= 0)) {
-            throw new VideoRequestError("素材来源信息缺失，请从移动云素材库重新选择");
+        const lowerModel = model.toLowerCase();
+        if (!lowerModel.includes("seedance") && !lowerModel.includes("moma")) {
+            throw new VideoRequestError("真人素材仅支持 Seedance / MoMA 系列视频模型，请切换模型或移除素材");
         }
-        // The gateway resolves the account from owned asset IDs; model channel IDs use a different namespace.
-        if (new Set(aiccReferences.map(item => item?.aiccChannelId)).size > 1) {
-            throw new VideoRequestError("这些素材来自不同渠道，当前无法确认账号一致，请选择同一渠道的素材");
+        if (!usesAccountProxy(config) || !useUserStore.getState().token) {
+            throw new VideoRequestError("请登录后使用真人素材，素材归属由服务端校验");
+        }
+        if (aiccReferences.some(item => !Number.isSafeInteger(item?.aiccChannelId) || (item?.aiccChannelId ?? 0) <= 0)) {
+            throw new VideoRequestError("素材来源信息缺失，请从素材库重新选择");
+        }
+        const channelIds = Array.from(new Set(aiccReferences.map(item => item!.aiccChannelId!)));
+        if (channelIds.length > 1) {
+            throw new VideoRequestError("所选素材来自不同渠道，当前无法跨渠道合成，请选择同一专线渠道的素材");
+        }
+        const assetChannelId = channelIds[0];
+        const channelMapping: Record<number, { name: string; models: string[] }> = {
+            7: { name: "极速专线（一区）", models: ["moma-1-seedance-2.0", "nm-moma-seedance-2.0"] },
+            6: { name: "高可用专线（二区）", models: ["moma-2-seedance-2.0", "moma-seedance-2.0", "doubao-seedance-2.0"] },
+            9: { name: "旗舰专线（三区）", models: ["doubao-3-seedance-2.0", "doubao-3-seedance-2.5", "moma-3-seedance-2.0"] },
+        };
+        const spec = channelMapping[assetChannelId];
+        if (spec && !spec.models.some(m => m.toLowerCase() === lowerModel)) {
+            throw new VideoRequestError(`您选用的真人素材来自「${spec.name}」，当前视频模型（${model}）不属于该渠道。请将视频模型切换为【${spec.models.join(" 或 ")}】后再生成。`);
         }
     }
     const size = normalizeVideoSize(config.size);

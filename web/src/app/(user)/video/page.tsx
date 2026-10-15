@@ -1335,7 +1335,7 @@ export default function VideoPage() {
                 }}
             />
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
-            <AssetPickerModal allowAicc aiccSelectionEnabled={aiccSelectionEnabled} open={assetPickerOpen} defaultTab={assetPickerTab} onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal allowAicc aiccSelectionEnabled={aiccSelectionEnabled} currentModel={model} open={assetPickerOpen} defaultTab={assetPickerTab} onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>

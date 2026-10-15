@@ -1,31 +1,46 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Empty, Input, QRCode, Select, Spin, Tag, Upload } from "antd";
-import { Radio } from "lucide-react";
+import { Alert, App, Button, Empty, Input, Popconfirm, QRCode, Select, Spin, Tag, Tooltip, Upload } from "antd";
+import { Copy, Radio, Trash2 } from "lucide-react";
 import { useUserStore } from "@/stores/use-user-store";
-import { AICC_UPLOAD_LIMITS, aiccAssets, aiccChannels, aiccCheck, aiccCreateAsset, aiccCreateGroup, aiccGroups, aiccSession, aiccUpload, aiccUploadExpiry, validateAiccFile, type AiccAsset, type AiccChannel, type AiccGroup, type AiccSession, type AiccUpload } from "@/services/api/aicc";
+import { AICC_UPLOAD_LIMITS, aiccAssets, aiccChannels, aiccCheck, aiccCreateAsset, aiccCreateGroup, aiccDeleteAsset, aiccDeleteGroup, aiccGroups, aiccSession, aiccUpload, aiccUploadExpiry, getChannelIdForModel, AICC_CHANNEL_MODEL_MAPPING, validateAiccFile, type AiccAsset, type AiccChannel, type AiccGroup, type AiccSession, type AiccUpload } from "@/services/api/aicc";
 import type { InsertAssetPayload } from "@/app/(user)/canvas/types";
 import { captureSessionIdentity, subscribeSessionIdentity } from "@/lib/session-identity";
 
 const statusLabels: Record<string, string> = { ACTIVE: "可用", PROCESSING: "处理中", FAILED: "入库失败", EXPIRED: "已过期" };
 const errorText = (error: unknown) => error instanceof Error ? error.message : "请求失败，请重试";
 
-type PickerProps = { onInsert: (payload: InsertAssetPayload) => void; selectionEnabled?: boolean };
+type PickerProps = {
+    onInsert?: (payload: InsertAssetPayload) => void;
+    selectionEnabled?: boolean;
+    currentModel?: string;
+    manageMode?: boolean;
+};
 
-export function AiccAssetPicker({ onInsert, selectionEnabled = true }: PickerProps) {
+export function AiccAssetPicker({ onInsert, selectionEnabled = true, currentModel, manageMode = false }: PickerProps) {
     const identity = useUserStore(state => state.user?.id);
-    return <AiccAssetPickerContent key={identity || "anonymous"} onInsert={onInsert} selectionEnabled={selectionEnabled} />;
+    return <AiccAssetPickerContent key={`${identity || "anonymous"}-${currentModel || ""}`} onInsert={onInsert} selectionEnabled={selectionEnabled} currentModel={currentModel} manageMode={manageMode} />;
 }
 
-function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
+function AiccAssetPickerContent({ onInsert, selectionEnabled = true, currentModel, manageMode = false }: PickerProps) {
     const { message } = App.useApp();
     const identity = useUserStore(state => state.user?.id);
     const identityEpoch = useSyncExternalStore(subscribeSessionIdentity, () => captureSessionIdentity().epoch, () => 0);
     const channelsQuery = useQuery({ queryKey: ["aicc-channels", identity, identityEpoch], queryFn: ({ signal }) => aiccChannels(signal), retry: false, enabled: !!identity });
     const channels = Array.isArray(channelsQuery.data) ? channelsQuery.data : [];
-    const [selectedChannelId, setSelectedChannelId] = useState<number | undefined>(undefined);
+    
+    // 如果外部传入了当前选中的视频模型，自动预选对应的渠道
+    const modelMatchedChannelId = useMemo(() => currentModel ? getChannelIdForModel(currentModel) : undefined, [currentModel]);
+    const [selectedChannelId, setSelectedChannelId] = useState<number | undefined>(modelMatchedChannelId);
+    
+    useEffect(() => {
+        if (modelMatchedChannelId && channels.some(c => c.id === modelMatchedChannelId)) {
+            setSelectedChannelId(modelMatchedChannelId);
+        }
+    }, [modelMatchedChannelId, channels]);
+
     const activeChannelId = selectedChannelId ?? (channels.length === 1 ? channels[0].id : undefined);
     const activeChannel = channels.find(c => c.id === activeChannelId);
     const channelReady = Boolean(identity && activeChannel && !channelsQuery.isError && !channelsQuery.isPending);
@@ -87,15 +102,28 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         finally { if (version === lifecycle.current) setBusy(false); }
     };
     const insert = (asset: AiccAsset) => {
-        if (!channelReady || !selectionEnabled || asset.status.toUpperCase() !== "ACTIVE") return;
-        if (asset.channelId !== activeChannelId) { message.error("素材来源与当前渠道不一致，请刷新后重新选择"); return; }
+        if (!channelReady || asset.status.toUpperCase() !== "ACTIVE") return;
+        const targetChannelId = asset.channelId || activeChannelId;
+        if (targetChannelId !== activeChannelId) { message.error("素材来源与当前渠道不一致，请刷新后重新选择"); return; }
+        
+        // 核心校验：选用不同渠道的真人素材后，限制只能在该渠道对应的视频模型中使用
+        if (currentModel && targetChannelId) {
+            const spec = AICC_CHANNEL_MODEL_MAPPING[targetChannelId];
+            if (spec && !spec.models.some(m => m.toLowerCase() === currentModel.toLowerCase())) {
+                message.warning(`当前素材属于「${spec.name}」，与当前视频模型（${currentModel}）不匹配。请切换视频模型为【${spec.models.join(" 或 ")}】后再选用。`);
+                return;
+            }
+        }
+        
         const aiccUri = `asset://${asset.assetId}`;
         if (!/^asset:\/\/asset-[A-Za-z0-9_-]+$/.test(aiccUri)) {message.error("素材标识异常，请刷新");return;}
         const preview = /^https?:\/\//.test(asset.assetUrl || "") ? asset.assetUrl! : "";
         const base = {title: asset.assetName || "人物素材", aiccUri, aiccChannelId: asset.channelId || activeChannelId};
-        if (asset.assetType === "Image") onInsert({...base, kind:"image", dataUrl:preview, mimeType:"image/jpeg"});
-        else if (asset.assetType === "Video") onInsert({...base, kind:"video", url:preview, mimeType:"video/mp4"});
-        else if (asset.assetType === "Audio") onInsert({...base, kind:"audio", url:preview, mimeType:"audio/mpeg"});
+        if (onInsert) {
+            if (asset.assetType === "Image") onInsert({...base, kind:"image", dataUrl:preview, mimeType:"image/jpeg"});
+            else if (asset.assetType === "Video") onInsert({...base, kind:"video", url:preview, mimeType:"video/mp4"});
+            else if (asset.assetType === "Audio") onInsert({...base, kind:"audio", url:preview, mimeType:"audio/mpeg"});
+        }
     };
     return <div className="space-y-4 text-sm">
         <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/45">
@@ -115,7 +143,7 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
             <p>真人素材仅展示当前账号已实名认证并有权访问的素材。选用后会自动带入资产引用，不需要手动复制 ID。</p>
             <p>认证成功后，可在同一人物组继续添加本人的素材；系统会进行同人一致性与最终入库校验，认证或上传成功不保证素材入库成功。</p>
         </div>
-        {!selectionEnabled && <Alert type="info" showIcon message="当前模型不支持人物素材。请先选择支持的模型，再选用素材。" />}
+        {!selectionEnabled && !manageMode && <Alert type="info" showIcon message="当前模型不支持人物素材。请先选择支持的模型，再选用素材。" />}
         {failure && <Alert type="error" showIcon message={failure} />}
         {session && <section className="grid gap-4 rounded-xl border border-stone-200 bg-stone-50/60 p-4 dark:border-stone-700 dark:bg-stone-900/40 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
             <div className="mx-auto sm:mx-0"><QRCode value={session.h5Link} size={144} status={seconds ? "active" : "expired"} onRefresh={() => void begin()} /></div>
@@ -123,8 +151,31 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
         </section>}
         {channelReady && type === "AIGC" && <div className="grid gap-2 rounded-xl border border-stone-200 p-3 dark:border-stone-800 sm:grid-cols-[minmax(0,1fr)_auto]"><Input aria-label="新素材组名称" placeholder="虚拟人物组名称" maxLength={64} value={groupName} onChange={e=>setGroupName(e.target.value)} /><Button disabled={!groupName.trim() || busy} onClick={() => void mutate(()=>aiccCreateGroup(groupName.trim(), activeChannelId),"素材组已创建")}>新建组</Button></div>}
         {groups.isError ? <Alert type="error" message={errorText(groups.error)} action={<Button onClick={()=>void groups.refetch()}>重试</Button>} /> : groups.isLoading ? <Spin /> : <div className="space-y-2">
-            <div className="text-xs font-medium text-stone-500 dark:text-stone-400">素材组</div>
-            <Select className="w-full" aria-label="选择人物素材组" placeholder="选择素材组" value={group?.groupId} options={groups.data?.data.map(item=>({value:item.groupId,label:item.groupName || item.groupId}))} onChange={id=>{setSelected(groups.data?.data.find(item=>item.groupId===id)||null);setAssetPage(1);}} />
+            <div className="text-xs font-medium text-stone-500 dark:text-stone-400">素材组管理</div>
+            <div className="flex items-center gap-2">
+                <Select className="flex-1 min-w-0" aria-label="选择人物素材组" placeholder="选择素材组" value={group?.groupId} options={groups.data?.data.map(item=>({value:item.groupId,label:item.groupName || item.groupId}))} onChange={id=>{setSelected(groups.data?.data.find(item=>item.groupId===id)||null);setAssetPage(1);}} />
+                {group ? (
+                    <Popconfirm
+                        title="删除素材组"
+                        description={`确定要删除素材组「${group.groupName || group.groupId}」及其所有内容吗？`}
+                        onConfirm={async () => {
+                            try {
+                                await aiccDeleteGroup(group.groupId, activeChannelId);
+                                message.success("素材组已成功删除");
+                                setSelected(null);
+                                void groups.refetch();
+                            } catch (err) {
+                                message.error(errorText(err));
+                            }
+                        }}
+                        okText="删除"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                    >
+                        <Button danger size="middle" icon={<Trash2 className="size-3.5" />}>删除组</Button>
+                    </Popconfirm>
+                ) : null}
+            </div>
             <nav aria-label="人物素材组分页" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-stone-50 px-2.5 py-2 dark:bg-stone-900/60"><span className="text-xs text-stone-500 dark:text-stone-400">素材组第 {groupPage} 页</span><div className="flex items-center gap-2"><Button size="small" aria-label="素材组上一页" disabled={groupPage<=1 || groups.isFetching} onClick={()=>setGroupPage(p=>p-1)}>上一页</Button><Button size="small" aria-label="素材组下一页" disabled={groups.isFetching || (groups.data?.total!==undefined ? groupPage*12>=groups.data.total : (groups.data?.data.length||0)<12)} onClick={()=>setGroupPage(p=>p+1)}>下一页</Button></div></nav>
         </div>}
         {channelReady && group && <>
@@ -138,7 +189,58 @@ function AiccAssetPickerContent({ onInsert, selectionEnabled }: PickerProps) {
                         <div className="mb-3 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-stone-100 dark:bg-stone-900">
                             {asset.assetUrl && /^https?:\/\//.test(asset.assetUrl) ? asset.assetType === "Image" ? <img src={asset.assetUrl} alt={asset.assetName} loading="lazy" className="h-full w-full object-contain" /> : asset.assetType === "Video" ? <video src={asset.assetUrl} aria-label={asset.assetName} controls playsInline preload="none" className="h-full w-full object-contain" /> : <audio src={asset.assetUrl} aria-label={asset.assetName} controls preload="none" className="w-full" /> : <span className="text-xs text-stone-500">暂无预览</span>}
                         </div>
-                        <div className="space-y-2"><div className="flex min-w-0 items-start justify-between gap-2"><span className="min-w-0 truncate text-xs font-medium" title={asset.assetName}>{asset.assetName||"未命名素材"}</span><div className="flex shrink-0 flex-wrap justify-end gap-1"><Tag color="cyan">{channelTag}</Tag><Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag></div></div><Button className="w-full" type="primary" disabled={!selectionEnabled || asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button></div>
+                        <div className="space-y-2">
+                            <div className="flex min-w-0 items-start justify-between gap-1.5">
+                                <span className="min-w-0 truncate text-xs font-medium" title={asset.assetName}>{asset.assetName||"未命名素材"}</span>
+                                <div className="flex shrink-0 flex-wrap justify-end gap-1 items-center">
+                                    <Tag color="cyan">{channelTag}</Tag>
+                                    <Tag>{statusLabels[asset.status.toUpperCase()]||asset.status}</Tag>
+                                    <Tooltip title="复制资产 URI (asset://)">
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            className="!px-1"
+                                            icon={<Copy className="size-3 text-stone-500" />}
+                                            onClick={() => {
+                                                void navigator.clipboard.writeText(`asset://${asset.assetId}`).then(() => message.success(`已复制资产 ID: asset://${asset.assetId}`));
+                                            }}
+                                        />
+                                    </Tooltip>
+                                    <Popconfirm
+                                        title="删除素材"
+                                        description={`确定要从素材库彻底删除「${asset.assetName || asset.assetId}」吗？`}
+                                        onConfirm={async () => {
+                                            try {
+                                                await aiccDeleteAsset(asset.assetId, asset.channelId || activeChannelId);
+                                                message.success("素材已删除");
+                                                refreshAssets();
+                                            } catch (err) {
+                                                message.error(errorText(err));
+                                            }
+                                        }}
+                                        okText="删除"
+                                        cancelText="取消"
+                                        okButtonProps={{ danger: true }}
+                                    >
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            danger
+                                            className="!px-1"
+                                            icon={<Trash2 className="size-3 text-red-500" />}
+                                            title="删除素材"
+                                        />
+                                    </Popconfirm>
+                                </div>
+                            </div>
+                            {onInsert ? (
+                                <Button className="w-full" type="primary" disabled={!selectionEnabled || asset.status.toUpperCase()!=="ACTIVE"} onClick={()=>insert(asset)}>选用此素材</Button>
+                            ) : (
+                                <Button className="w-full" onClick={() => {
+                                    void navigator.clipboard.writeText(`asset://${asset.assetId}`).then(() => message.success(`已复制资产 ID: asset://${asset.assetId}`));
+                                }}>复制资产引用 ID</Button>
+                            )}
+                        </div>
                     </article>
                 );
             })}</div>}
@@ -219,7 +321,9 @@ function AssetUploadForm({ group, onSubmitted }: { group: AiccGroup; onSubmitted
                     if (!valid()) return;
                     uploaded.current = result;
                 }
-                assetUrl = uploaded.current.url;
+                const currentUpload = uploaded.current;
+                if (!currentUpload) throw new Error("上传未返回有效素材链接");
+                assetUrl = currentUpload.url;
             }
             if (!valid()) return;
             setPhase("creating");

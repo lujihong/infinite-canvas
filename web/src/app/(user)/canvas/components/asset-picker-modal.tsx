@@ -22,11 +22,12 @@ type Props = {
     defaultTab?: AssetPickerTab;
     allowAicc?: boolean;
     aiccSelectionEnabled?: boolean;
+    currentModel?: string;
     onInsert: (payload: InsertAssetPayload) => void;
     onClose: () => void;
 };
 
-export function AssetPickerModal({ open, defaultTab = "my-assets", allowAicc = false, aiccSelectionEnabled = true, onInsert, onClose }: Props) {
+export function AssetPickerModal({ open, defaultTab = "my-assets", allowAicc = false, aiccSelectionEnabled = true, currentModel, onInsert, onClose }: Props) {
     const [activeTab, setActiveTab] = useState<AssetPickerTab>(defaultTab);
 
     useEffect(() => {
@@ -41,7 +42,7 @@ export function AssetPickerModal({ open, defaultTab = "my-assets", allowAicc = f
                 items={[
                     { key: "my-assets", label: "我的素材", children: <MyAssetsTab onInsert={onInsert} /> },
                     { key: "library", label: "素材库", children: <LibraryTab onInsert={onInsert} /> },
-                    ...(allowAicc ? [{ key: "aicc", label: "人物素材与认证", children: open && activeTab === "aicc" ? <AiccAssetPicker onInsert={onInsert} selectionEnabled={aiccSelectionEnabled} /> : null }] : []),
+                    ...(allowAicc ? [{ key: "aicc", label: "真人素材与认证", children: open && activeTab === "aicc" ? <AiccAssetPicker onInsert={onInsert} selectionEnabled={aiccSelectionEnabled} currentModel={currentModel} /> : null }] : []),
                 ]}
             />
         </Modal>

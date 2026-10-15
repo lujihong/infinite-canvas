@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Download, PencilLine, Search, Trash2 } from "lucide-react";
+import { Copy, Download, Images, PencilLine, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { AssetFormModal } from "@/components/assets/asset-form-modal";
+import { AiccAssetPicker } from "@/components/aicc/asset-picker";
 
 const kindOptions = [
     { label: "全部", value: "all" },
@@ -27,6 +28,7 @@ export default function AssetsPage() {
     const assets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);
     const removeAsset = useAssetStore((state) => state.removeAsset);
+    const [mainTab, setMainTab] = useState<"local" | "aicc">("local");
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState<AssetKind | "all">("all");
     const [page, setPage] = useState(1);
@@ -117,97 +119,140 @@ export default function AssetsPage() {
                 <div className="pb-8">
                     <div className="mx-auto max-w-5xl text-center">
                         <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">我的素材</h1>
-                        <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">收藏常用文本和图片，按类型、标题和标签快速查找。</p>
-                    </div>
+                        <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">管理常用创作内容与真人实名专线素材资产。</p>
 
-                    <div className="mx-auto mt-8 w-full max-w-2xl">
-                        <Input.Search
-                            className="w-full"
-                            size="large"
-                            allowClear
-                            prefix={<Search className="size-4 text-stone-400" />}
-                            value={keyword}
-                            placeholder="搜索标题、内容、标签或来源"
-                            onChange={(event) => {
-                                setPage(1);
-                                setKeyword(event.target.value);
-                            }}
-                            onSearch={(value) => {
-                                setPage(1);
-                                setKeyword(value);
-                            }}
-                        />
-                    </div>
-
-                    <div className="mx-auto mt-6 grid max-w-6xl gap-3 text-left">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
-                                <div className="text-xs font-medium text-stone-500 dark:text-stone-400">类型</div>
-                                <div className="flex flex-wrap gap-2">
-                                    {kindOptions.map((option) => (
-                                        <Tag.CheckableTag
-                                            key={option.value}
-                                            checked={kindFilter === option.value}
-                                            className={cn("prompt-filter-tag", kindFilter === option.value && "is-active")}
-                                            onChange={() => {
-                                                setPage(1);
-                                                setKindFilter(option.value as AssetKind | "all");
-                                            }}
-                                        >
-                                            {option.label}
-                                        </Tag.CheckableTag>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="flex flex-wrap gap-4">
+                        {/* 主分类 Tab */}
+                        <div className="mt-6 flex justify-center">
+                            <div className="inline-flex rounded-xl border border-stone-200 bg-stone-100/80 p-1 dark:border-stone-800 dark:bg-stone-900/80">
                                 <button
                                     type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => void exportAllAssets()}
+                                    onClick={() => setMainTab("local")}
+                                    className={cn(
+                                        "flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition cursor-pointer",
+                                        mainTab === "local"
+                                            ? "bg-white text-stone-900 shadow-sm dark:bg-stone-800 dark:text-white"
+                                            : "text-stone-500 hover:text-stone-800 dark:hover:text-stone-300"
+                                    )}
                                 >
-                                    导出素材
+                                    <Images className="size-3.5" />
+                                    <span>通用创作素材</span>
+                                    <span className="rounded-full bg-stone-200/80 px-1.5 py-0.2 text-[10px] text-stone-600 dark:bg-stone-700 dark:text-stone-300">
+                                        {validAssets.length}
+                                    </span>
                                 </button>
                                 <button
                                     type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => assetInputRef.current?.click()}
+                                    onClick={() => setMainTab("aicc")}
+                                    className={cn(
+                                        "flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition cursor-pointer",
+                                        mainTab === "aicc"
+                                            ? "bg-white text-stone-900 shadow-sm dark:bg-stone-800 dark:text-white"
+                                            : "text-stone-500 hover:text-stone-800 dark:hover:text-stone-300"
+                                    )}
                                 >
-                                    导入素材
-                                </button>
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={openCreate}
-                                >
-                                    新增素材
+                                    <ShieldCheck className="size-3.5 text-amber-500" />
+                                    <span>真人素材与实名认证中心</span>
                                 </button>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <div className="mx-auto flex max-w-7xl flex-col gap-5">
-                    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                        {visibleAssets.map((asset) => (
-                            <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadAsset} onDelete={() => setDeletingAsset(asset)} />
-                        ))}
-                    </div>
+                    {mainTab === "aicc" ? (
+                        <div className="mx-auto mt-6 max-w-5xl rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+                            <AiccAssetPicker manageMode />
+                        </div>
+                    ) : (
+                        <>
+                            <div className="mx-auto mt-8 w-full max-w-2xl">
+                                <Input.Search
+                                    className="w-full"
+                                    size="large"
+                                    allowClear
+                                    prefix={<Search className="size-4 text-stone-400" />}
+                                    value={keyword}
+                                    placeholder="搜索标题、内容、标签或来源"
+                                    onChange={(event) => {
+                                        setPage(1);
+                                        setKeyword(event.target.value);
+                                    }}
+                                    onSearch={(value) => {
+                                        setPage(1);
+                                        setKeyword(value);
+                                    }}
+                                />
+                            </div>
 
-                    {!visibleAssets.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有找到素材" className="py-20" /> : null}
+                            <div className="mx-auto mt-6 grid max-w-6xl gap-3 text-left">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
+                                        <div className="text-xs font-medium text-stone-500 dark:text-stone-400">类型</div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {kindOptions.map((option) => (
+                                                <Tag.CheckableTag
+                                                    key={option.value}
+                                                    checked={kindFilter === option.value}
+                                                    className={cn("prompt-filter-tag", kindFilter === option.value && "is-active")}
+                                                    onChange={() => {
+                                                        setPage(1);
+                                                        setKindFilter(option.value as AssetKind | "all");
+                                                    }}
+                                                >
+                                                    {option.label}
+                                                </Tag.CheckableTag>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-4">
+                                        <button
+                                            type="button"
+                                            className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
+                                            onClick={() => void exportAllAssets()}
+                                        >
+                                            导出素材
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
+                                            onClick={() => assetInputRef.current?.click()}
+                                        >
+                                            导入素材
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
+                                            onClick={openCreate}
+                                        >
+                                            新增素材
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
 
-                    <div className="flex justify-center">
-                        <Pagination
-                            current={page}
-                            pageSize={pageSize}
-                            total={filteredAssets.length}
-                            showSizeChanger
-                            pageSizeOptions={[10, 20, 50, 100]}
-                            onChange={(nextPage, nextPageSize) => {
-                                setPage(nextPage);
-                                setPageSize(nextPageSize);
-                            }}
-                        />
-                    </div>
+                            <div className="mx-auto flex max-w-7xl flex-col gap-5 mt-6">
+                                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                    {visibleAssets.map((asset) => (
+                                        <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadAsset} onDelete={() => setDeletingAsset(asset)} />
+                                    ))}
+                                </div>
+
+                                {!visibleAssets.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有找到素材" className="py-20" /> : null}
+
+                                <div className="flex justify-center">
+                                    <Pagination
+                                        current={page}
+                                        pageSize={pageSize}
+                                        total={filteredAssets.length}
+                                        showSizeChanger
+                                        pageSizeOptions={[10, 20, 50, 100]}
+                                        onChange={(nextPage, nextPageSize) => {
+                                            setPage(nextPage);
+                                            setPageSize(nextPageSize);
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </>
+                    )}
                 </div>
             </main>
 

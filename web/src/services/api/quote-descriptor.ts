@@ -53,13 +53,28 @@ export function buildQuoteDescriptor({ config, mode, prompt, references = {}, ba
     const sourceChannels = new Set<number>();
     const referenceValue = (ref: QuoteReference, field: string): string | undefined => {
         if (ref.aiccUri) {
-            if (mode !== "video" || !model.toLowerCase().includes("seedance")) missing.push(`${field}.unsupported_aicc`);
+            const lowerModel = model.toLowerCase();
+            if (mode !== "video" || (!lowerModel.includes("seedance") && !lowerModel.includes("moma"))) {
+                missing.push(`${field}.unsupported_aicc`);
+            }
             if (!/^asset:\/\/asset-[A-Za-z0-9_-]+$/.test(ref.aiccUri)) {
                 missing.push(`${field}.aiccUri`);
                 return undefined;
             }
-            if (!Number.isSafeInteger(ref.aiccChannelId) || (ref.aiccChannelId ?? 0) <= 0) missing.push(`${field}.aiccChannelId`);
-            else sourceChannels.add(ref.aiccChannelId!);
+            if (!Number.isSafeInteger(ref.aiccChannelId) || (ref.aiccChannelId ?? 0) <= 0) {
+                missing.push(`${field}.aiccChannelId`);
+            } else {
+                sourceChannels.add(ref.aiccChannelId!);
+                const channelMapping: Record<number, string[]> = {
+                    7: ["moma-1-seedance-2.0", "nm-moma-seedance-2.0"],
+                    6: ["moma-2-seedance-2.0", "moma-seedance-2.0", "doubao-seedance-2.0"],
+                    9: ["doubao-3-seedance-2.0", "doubao-3-seedance-2.5", "moma-3-seedance-2.0"],
+                };
+                const allowed = channelMapping[ref.aiccChannelId!];
+                if (allowed && !allowed.some(m => m.toLowerCase() === lowerModel)) {
+                    missing.push(`${field}.channel_mismatch`);
+                }
+            }
             return ref.aiccUri;
         }
         const url = publicReferenceUrl(ref.url) || publicReferenceUrl(ref.dataUrl);

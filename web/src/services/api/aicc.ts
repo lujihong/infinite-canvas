@@ -25,7 +25,7 @@ export function aiccUploadExpiry(value: number): number {
     return Number.isSafeInteger(value) && value > 0 ? value * 1000 : NaN;
 }
 
-async function request(path: string, method: "GET" | "POST", data?: unknown, params?: Record<string, unknown>, signal?: AbortSignal) {
+async function request(path: string, method: "GET" | "POST" | "DELETE", data?: unknown, params?: Record<string, unknown>, signal?: AbortSignal) {
     const token = useUserStore.getState().token;
     const identity = captureSessionIdentity();
     if (!token || identity.token !== token || !identity.userId) throw new Error("请先登录后使用人物素材");
@@ -104,3 +104,25 @@ export async function aiccUpload(file: File, groupId: string, assetType: AiccAss
     if (!value?.id || !/^https:\/\//.test(value?.url || "") || value.assetType !== assetType || !(aiccUploadExpiry(value.expiresAt) > Date.now())) throw new Error("上传响应无效或已过期，请重新上传");
     return value;
 }
+
+export async function aiccDeleteAsset(assetId: string, channelId?: number, signal?: AbortSignal) {
+    return request(`assets/${encodeURIComponent(assetId)}`, "DELETE", undefined, aiccChannelParams(channelId), signal);
+}
+
+export async function aiccDeleteGroup(groupId: string, channelId?: number, signal?: AbortSignal) {
+    return request(`asset-groups/${encodeURIComponent(groupId)}`, "DELETE", undefined, aiccChannelParams(channelId), signal);
+}
+
+export function getChannelIdForModel(modelName: string): number | undefined {
+    const m = (modelName || "").trim().toLowerCase();
+    if (m === "moma-1-seedance-2.0") return 7;
+    if (m === "moma-2-seedance-2.0") return 6;
+    if (m === "moma-3-seedance-2.0" || m === "doubao-3-seedance-2.0" || m === "doubao-3-seedance-2.5") return 9;
+    return undefined;
+}
+
+export const AICC_CHANNEL_MODEL_MAPPING: Record<number, { name: string; models: string[] }> = {
+    7: { name: "极速专线（一区）", models: ["moma-1-seedance-2.0"] },
+    6: { name: "高可用专线（二区）", models: ["moma-2-seedance-2.0"] },
+    9: { name: "旗舰专线（三区）", models: ["doubao-3-seedance-2.0", "doubao-3-seedance-2.5", "moma-3-seedance-2.0"] },
+};
