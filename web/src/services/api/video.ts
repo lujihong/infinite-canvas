@@ -362,7 +362,7 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
         const channelMapping: Record<number, { name: string; models: string[] }> = {
             7: { name: "极速专线（一区）", models: ["moma-1-seedance-2.0", "nm-moma-seedance-2.0"] },
             6: { name: "高可用专线（二区）", models: ["moma-2-seedance-2.0", "moma-seedance-2.0", "doubao-seedance-2.0"] },
-            9: { name: "旗舰专线（三区）", models: ["moma-3-seedance-2.0"] },
+            9: { name: "旗舰专线（三区）", models: ["doubao-3-seedance-2.0", "doubao-3-seedance-2.5", "moma-3-seedance-2.0"] },
         };
         const spec = channelMapping[assetChannelId];
         if (spec && !spec.models.some(m => m.toLowerCase() === lowerModel)) {
@@ -402,13 +402,13 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
         const elementList = await (kieKlingV3 ? normalizeKIEKlingElementList(config.videoElementList) : normalizeKlingElementList(config.videoElementList));
         if (elementList.length) body.append("element_list", JSON.stringify(elementList));
     }
-    const files = await Promise.all(input.references.slice(0, referencePolicy.imageLimit).map(imageReferenceToFormValue));
+    const files = await Promise.all(input.references.slice(0, referencePolicy.imageLimit).map((img) => imageReferenceToFormValue(img, model)));
     files.forEach((file) => body.append("input_reference[]", file));
-    if (referencePolicy.frames && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame));
-    if (referencePolicy.frames && input.lastFrame) body.append("last_frame_url", await imageReferenceToFormValue(input.lastFrame));
-    const videoFiles = await Promise.all(input.videoReferences.slice(0, referencePolicy.videoLimit).map(mediaReferenceToFormValue));
+    if (referencePolicy.frames && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame, model));
+    if (referencePolicy.frames && input.lastFrame) body.append("last_frame_url", await imageReferenceToFormValue(input.lastFrame, model));
+    const videoFiles = await Promise.all(input.videoReferences.slice(0, referencePolicy.videoLimit).map((vid) => mediaReferenceToFormValue(vid, model)));
     videoFiles.forEach((file) => body.append("video_reference[]", file));
-    const audioFiles = referencePolicy.audio ? await Promise.all(input.audioReferences.map(mediaReferenceToFormValue)) : [];
+    const audioFiles = referencePolicy.audio ? await Promise.all(input.audioReferences.map((aud) => mediaReferenceToFormValue(aud, model))) : [];
     audioFiles.forEach((file) => body.append("audio_reference[]", file));
     return body;
 }
@@ -681,8 +681,16 @@ function checkedAiccUri(value: string) {
     return value;
 }
 
-async function imageReferenceToFormValue(image: ReferenceImage) {
-    if (image.aiccUri) return checkedAiccUri(image.aiccUri);
+async function imageReferenceToFormValue(image: ReferenceImage, model?: string) {
+    const isMoma = (model || "").toLowerCase().includes("moma");
+    if (image.aiccUri) {
+        if (isMoma) return checkedAiccUri(image.aiccUri);
+        for (const url of [image.url, image.dataUrl]) {
+            const publicUrl = publicHttpUrl(url);
+            if (publicUrl) return publicUrl;
+        }
+        return checkedAiccUri(image.aiccUri);
+    }
     const resolvedUrl = await resolveImageUrl(image.storageKey, "");
     for (const url of [image.url, resolvedUrl, image.dataUrl]) {
         const publicUrl = publicHttpUrl(url);
@@ -699,8 +707,14 @@ async function mediaReferenceToFile(media: ReferenceVideo | ReferenceAudio) {
     return new File([blob], media.name || "reference", { type: media.type || blob.type || "application/octet-stream" });
 }
 
-async function mediaReferenceToFormValue(media: ReferenceVideo | ReferenceAudio) {
-    if (media.aiccUri) return checkedAiccUri(media.aiccUri);
+async function mediaReferenceToFormValue(media: ReferenceVideo | ReferenceAudio, model?: string) {
+    const isMoma = (model || "").toLowerCase().includes("moma");
+    if (media.aiccUri) {
+        if (isMoma) return checkedAiccUri(media.aiccUri);
+        const publicUrl = publicHttpUrl(media.url);
+        if (publicUrl) return publicUrl;
+        return checkedAiccUri(media.aiccUri);
+    }
     const resolvedUrl = await resolveMediaUrl(media.storageKey, media.url);
     const publicUrl = publicHttpUrl(resolvedUrl) || publicHttpUrl(media.url);
     if (publicUrl) return publicUrl;

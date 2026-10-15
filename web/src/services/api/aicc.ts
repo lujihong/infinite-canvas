@@ -117,12 +117,12 @@ export function getChannelIdForModel(modelName: string): number | undefined {
     const m = (modelName || "").trim().toLowerCase();
     if (m === "moma-1-seedance-2.0") return 7;
     if (m === "moma-2-seedance-2.0") return 6;
-    if (m === "moma-3-seedance-2.0") return 9;
+    if (m === "moma-3-seedance-2.0" || m === "doubao-3-seedance-2.0" || m === "doubao-3-seedance-2.5") return 9;
     return undefined;
 }
 
 export const AICC_CHANNEL_MODEL_MAPPING: Record<number, { name: string; models: string[] }> = {
     7: { name: "极速专线（一区）", models: ["moma-1-seedance-2.0"] },
     6: { name: "高可用专线（二区）", models: ["moma-2-seedance-2.0"] },
-    9: { name: "旗舰专线（三区）", models: ["moma-3-seedance-2.0"] },
+    9: { name: "旗舰专线（三区）", models: ["doubao-3-seedance-2.0", "doubao-3-seedance-2.5", "moma-3-seedance-2.0"] },
 };
