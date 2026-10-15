@@ -68,7 +68,7 @@ export function buildQuoteDescriptor({ config, mode, prompt, references = {}, ba
                 const channelMapping: Record<number, string[]> = {
                     7: ["moma-1-seedance-2.0", "nm-moma-seedance-2.0"],
                     6: ["moma-2-seedance-2.0", "moma-seedance-2.0", "doubao-seedance-2.0"],
-                    9: ["doubao-3-seedance-2.0", "doubao-3-seedance-2.5", "moma-3-seedance-2.0"],
+                    9: ["moma-3-seedance-2.0"],
                 };
                 const allowed = channelMapping[ref.aiccChannelId!];
                 if (allowed && !allowed.some(m => m.toLowerCase() === lowerModel)) {
